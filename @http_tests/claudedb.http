@@ -117,6 +117,13 @@ Content-Type: application/json
 Authorization: Bearer {{jwt}}
 
 
+
+
+
+
+
+
+
 ###
 # 14. Get Metrics
 GET {{baseUrl}}/databases/{{dbId}}/metrics
@@ -150,6 +157,10 @@ Authorization: Bearer {{jwt}}
         "shared_buffers": "256MB"
     }
 }
+
+
+
+
 
 
 ###

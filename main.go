@@ -121,7 +121,7 @@ func main() {
 	configService := application.NewConfigService(repo, auditService)
 	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, cfg.Server.Region)
 	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
-	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region)
+	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
 
 	workerService := application.NewWorkerService(repo, dockerAdapter)
 	workerService.Start()

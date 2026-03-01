@@ -343,8 +343,36 @@ func (h *ClaudeDBHandler) ModifyDatabase(c *gin.Context) {
 		"status":      "MODIFYING",
 	})
 }
+
+type RestoreDatabasePayload struct {
+	SnapshotID string `json:"snapshotId" binding:"required"`
+	NewName    string `json:"newName,omitempty"`
+}
+
 func (h *ClaudeDBHandler) RestoreDatabase(c *gin.Context) {
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "RestoreDatabase requires full orchestrator integration - coming soon"})
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	var payload RestoreDatabasePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.snapshotService.RestoreDatabase(c.Request.Context(), application.RestoreDatabaseRequest{
+		SnapshotID: payload.SnapshotID,
+		NewName:    payload.NewName,
+		AccountID:  accountID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to restore database: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusCreated, result)
 }
 
 func (h *ClaudeDBHandler) DeleteSnapshot(c *gin.Context) {
