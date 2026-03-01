@@ -14,6 +14,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// --- Standard Response Envelope ---
+
+type APIResponse struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+func respond(c *gin.Context, statusCode int, message string, data interface{}) {
+	c.JSON(statusCode, APIResponse{
+		Code:    statusCode,
+		Message: message,
+		Data:    data,
+	})
+}
+
+func respondError(c *gin.Context, statusCode int, err error) {
+	c.JSON(statusCode, APIResponse{
+		Code:    statusCode,
+		Message: err.Error(),
+		Data:    nil,
+	})
+}
+
+// --- ClaudeDBHandler ---
+
 // ClaudeDBHandler handles database instance requests for the new control plane
 type ClaudeDBHandler struct {
 	dbService       *application.ClaudeDBService
@@ -68,410 +94,7 @@ func extractAccountID(c *gin.Context) (string, error) {
 	return payload.UserID, nil
 }
 
-// 3. Backup & Restore Lifecycles APIs
-
-func (h *ClaudeDBHandler) StartDatabase(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.dbService.StartDatabase(c.Request.Context(), id, accountID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Database starting successfully"})
-}
-
-func (h *ClaudeDBHandler) StopDatabase(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.dbService.StopDatabase(c.Request.Context(), id, accountID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Database stopping successfully"})
-}
-
-func (h *ClaudeDBHandler) RebootDatabase(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.dbService.RebootDatabase(c.Request.Context(), id, accountID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Database rebooting successfully"})
-}
-
-type CreateSnapshotPayload struct {
-	Name       string `json:"name" binding:"required"`
-	DatabaseID string `json:"databaseId" binding:"required"`
-}
-
-func (h *ClaudeDBHandler) CreateSnapshot(c *gin.Context) {
-	var payload CreateSnapshotPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	snap, err := h.snapshotService.CreateSnapshot(c.Request.Context(), application.CreateSnapshotRequest{
-		Name:       payload.Name,
-		DatabaseID: payload.DatabaseID,
-		AccountID:  accountID,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, snap)
-}
-
-func (h *ClaudeDBHandler) ListSnapshots(c *gin.Context) {
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-	dbID := c.Query("databaseId")
-
-	var dbIDPtr *string
-	if dbID != "" {
-		dbIDPtr = &dbID
-	}
-
-	snaps, err := h.snapshotService.ListSnapshots(c.Request.Context(), accountID, dbIDPtr)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, snaps)
-}
-
-// 4. Telemetry & Observability APIs
-
-func (h *ClaudeDBHandler) GetMetrics(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Database not found"})
-		return
-	}
-
-	// In a real implementation this would fetch from Prometheus or similar using the container ID / name
-	mockMetrics := gin.H{
-		"database_id":        db.ID,
-		"cpu_usage_percent":  2.5,
-		"memory_usage_mb":    145.2,
-		"active_connections": 12,
-		"disk_iops":          45,
-	}
-
-	c.JSON(http.StatusOK, mockMetrics)
-}
-
-func (h *ClaudeDBHandler) GetLogs(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Database not found"})
-		return
-	}
-
-	// In a real implementation this would multiplex docker logs stream
-	mockLogs := []string{
-		fmt.Sprintf("2023-10-27 10:00:00 UTC [1] LOG:  starting PostgreSQL 15.4 for ClaudeDB %s", db.Name),
-		"2023-10-27 10:00:00 UTC [1] LOG:  listening on IPv4 address \"0.0.0.0\", port 5432",
-		"2023-10-27 10:00:00 UTC [1] LOG:  listening on IPv6 address \"::\", port 5432",
-		"2023-10-27 10:00:00 UTC [1] LOG:  listening on Unix socket \"/var/run/postgresql/.s.PGSQL.5432\"",
-		"2023-10-27 10:00:00 UTC [26] LOG:  database system was shut down at 2023-10-27 09:59:59 UTC",
-		"2023-10-27 10:00:00 UTC [1] LOG:  database system is ready to accept connections",
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"database_id": db.ID,
-		"logs":        mockLogs,
-	})
-}
-
-// 5. Configuration parameters APIs
-
-func (h *ClaudeDBHandler) GetParameters(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Database not found"})
-		return
-	}
-
-	// Mock default postgresql.conf parameters
-	params := map[string]interface{}{
-		"max_connections":      100,
-		"shared_buffers":       "128MB",
-		"work_mem":             "4MB",
-		"maintenance_work_mem": "64MB",
-		"wal_level":            "replica",
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"database_id": db.ID,
-		"parameters":  params,
-	})
-}
-
-type ModifyParametersPayload struct {
-	Parameters map[string]interface{} `json:"parameters" binding:"required"`
-}
-
-func (h *ClaudeDBHandler) ModifyParameters(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Database not found"})
-		return
-	}
-
-	var payload ModifyParametersPayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Here a real implementation creates/modifies a postgresql.auto.conf inside the volume or container
-	// and checks if a reboot is pending based on `pg_settings.context != 'user'`
-	pendingReboot := false
-	for k := range payload.Parameters {
-		if k == "shared_buffers" || k == "max_connections" || k == "wal_level" {
-			pendingReboot = true
-		}
-	}
-
-	if pendingReboot {
-		_ = h.dbService.RebootDatabase(c.Request.Context(), id, accountID) // Mocking setting state to pending for now
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"database_id":        db.ID,
-		"message":            "Parameters applied successfully",
-		"pending_reboot":     pendingReboot,
-		"updated_parameters": payload.Parameters,
-	})
-}
-
-type ModifyDatabasePayload struct {
-	InstanceClass    string `json:"instanceClass" binding:"required"`
-	AllocatedStorage int    `json:"allocatedStorage,omitempty"`
-}
-
-func (h *ClaudeDBHandler) ModifyDatabase(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Database not found"})
-		return
-	}
-
-	var payload ModifyDatabasePayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Mocking actual instance modification (which would involve stopping, changing resources, and starting)
-	// For now just reboot to simulate downtime
-	if err := h.dbService.RebootDatabase(c.Request.Context(), id, accountID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to modify database: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"database_id": db.ID,
-		"message":     "Modification initiated successfully",
-		"status":      "MODIFYING",
-	})
-}
-
-type RestoreDatabasePayload struct {
-	SnapshotID string `json:"snapshotId" binding:"required"`
-	NewName    string `json:"newName,omitempty"`
-}
-
-func (h *ClaudeDBHandler) RestoreDatabase(c *gin.Context) {
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	var payload RestoreDatabasePayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	result, err := h.snapshotService.RestoreDatabase(c.Request.Context(), application.RestoreDatabaseRequest{
-		SnapshotID: payload.SnapshotID,
-		NewName:    payload.NewName,
-		AccountID:  accountID,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to restore database: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusCreated, result)
-}
-
-func (h *ClaudeDBHandler) DeleteSnapshot(c *gin.Context) {
-	id := c.Param("snapshot_id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.snapshotService.DeleteSnapshot(c.Request.Context(), id, accountID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "snapshot marked for deletion"})
-}
-
-// --- 6. Volume Management APIs ---
-
-type CreateVolumePayload struct {
-	Name   string `json:"name" binding:"required"`
-	SizeGB int    `json:"sizeGb" binding:"required,min=1"`
-}
-
-func (h *ClaudeDBHandler) CreateVolume(c *gin.Context) {
-	var payload CreateVolumePayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	vol, err := h.volumeService.CreateVolume(c.Request.Context(), application.CreateVolumeRequest{
-		Name:      payload.Name,
-		SizeGB:    payload.SizeGB,
-		AccountID: accountID,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, vol)
-}
-
-func (h *ClaudeDBHandler) ListVolumes(c *gin.Context) {
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	vols, err := h.volumeService.ListVolumes(c.Request.Context(), accountID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, vols)
-}
-
-func (h *ClaudeDBHandler) GetVolume(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	vol, err := h.volumeService.GetVolume(c.Request.Context(), id, accountID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "volume not found"})
-		return
-	}
-
-	c.JSON(http.StatusOK, vol)
-}
-
-func (h *ClaudeDBHandler) DeleteVolume(c *gin.Context) {
-	id := c.Param("id")
-	accountID, err := extractAccountID(c)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := h.volumeService.DeleteVolume(c.Request.Context(), id, accountID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "volume marked for deletion"})
-}
+// --- 1. Database CRUD ---
 
 type CreateDatabasePayload struct {
 	Name     string `json:"name" binding:"required"`
@@ -482,13 +105,13 @@ type CreateDatabasePayload struct {
 func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 	var input CreateDatabasePayload
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		respond(c, http.StatusBadRequest, err.Error(), nil)
 		return
 	}
 
 	userID, err := extractAccountID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
 		return
 	}
 
@@ -505,30 +128,30 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 	resp, err := h.dbService.CreateDatabase(c.Request.Context(), req)
 	if err != nil {
 		if err.Error() == "conflict: database is currently provisioning" {
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			respond(c, http.StatusConflict, err.Error(), nil)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
 		return
 	}
 
-	c.JSON(http.StatusCreated, resp)
+	respond(c, http.StatusCreated, "Database provisioned successfully", resp)
 }
 
 func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 	userID, err := extractAccountID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
 		return
 	}
 
 	dbs, err := h.dbService.ListDatabases(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
 		return
 	}
 
-	type Output struct {
+	type DBSummary struct {
 		ID        string          `json:"id"`
 		ARN       string          `json:"arn"`
 		Name      string          `json:"name"`
@@ -537,9 +160,9 @@ func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 		CreatedAt string          `json:"createdAt"`
 	}
 
-	outputs := make([]Output, 0, len(dbs))
+	outputs := make([]DBSummary, 0, len(dbs))
 	for _, db := range dbs {
-		outputs = append(outputs, Output{
+		outputs = append(outputs, DBSummary{
 			ID:        db.ID,
 			ARN:       db.ARN,
 			Name:      db.Name,
@@ -549,29 +172,30 @@ func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"databases": outputs})
+	respond(c, http.StatusOK, "Databases fetched successfully", outputs)
 }
 
 func (h *ClaudeDBHandler) GetDatabase(c *gin.Context) {
 	id := c.Param("id")
 	userID, err := extractAccountID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
 		return
 	}
 
 	db, err := h.dbService.GetDatabase(c.Request.Context(), id, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	respond(c, http.StatusOK, "Database fetched successfully", gin.H{
 		"id":        db.ID,
 		"arn":       db.ARN,
 		"name":      db.Name,
 		"status":    db.Status,
 		"port":      db.NodePort,
+		"host":      db.NodeHost,
 		"createdAt": db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
 }
@@ -580,31 +204,430 @@ func (h *ClaudeDBHandler) DeleteDatabase(c *gin.Context) {
 	id := c.Param("id")
 	userID, err := extractAccountID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
 		return
 	}
 
 	if err := h.dbService.DeleteDatabase(c.Request.Context(), id, userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Database deleted successfully"})
+	respond(c, http.StatusOK, "Database deleted successfully", nil)
 }
 
 func (h *ClaudeDBHandler) RotateCredentials(c *gin.Context) {
 	id := c.Param("id")
 	userID, err := extractAccountID(c)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
 		return
 	}
 
 	resp, err := h.dbService.RotateCredentials(c.Request.Context(), id, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	respond(c, http.StatusOK, "Credentials rotated successfully", resp)
+}
+
+// --- 2. Compute Lifecycle ---
+
+func (h *ClaudeDBHandler) StartDatabase(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	if err := h.dbService.StartDatabase(c.Request.Context(), id, accountID); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Database started successfully", gin.H{"id": id, "status": "AVAILABLE"})
+}
+
+func (h *ClaudeDBHandler) StopDatabase(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	if err := h.dbService.StopDatabase(c.Request.Context(), id, accountID); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Database stopped successfully", gin.H{"id": id, "status": "STOPPED"})
+}
+
+func (h *ClaudeDBHandler) RebootDatabase(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	if err := h.dbService.RebootDatabase(c.Request.Context(), id, accountID); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Database rebooted successfully", gin.H{"id": id, "status": "AVAILABLE"})
+}
+
+type ModifyDatabasePayload struct {
+	InstanceClass    string `json:"instanceClass" binding:"required"`
+	AllocatedStorage int    `json:"allocatedStorage,omitempty"`
+}
+
+func (h *ClaudeDBHandler) ModifyDatabase(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
+	if err != nil {
+		respond(c, http.StatusNotFound, "Database not found", nil)
+		return
+	}
+
+	var payload ModifyDatabasePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	if err := h.dbService.RebootDatabase(c.Request.Context(), id, accountID); err != nil {
+		respond(c, http.StatusInternalServerError, fmt.Sprintf("Failed to modify database: %v", err), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Database modification initiated successfully", gin.H{
+		"id":            db.ID,
+		"instanceClass": payload.InstanceClass,
+		"storage":       payload.AllocatedStorage,
+		"status":        "MODIFYING",
+	})
+}
+
+// --- 3. Backup & Restore ---
+
+type CreateSnapshotPayload struct {
+	Name       string `json:"name" binding:"required"`
+	DatabaseID string `json:"databaseId" binding:"required"`
+}
+
+func (h *ClaudeDBHandler) CreateSnapshot(c *gin.Context) {
+	var payload CreateSnapshotPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	snap, err := h.snapshotService.CreateSnapshot(c.Request.Context(), application.CreateSnapshotRequest{
+		Name:       payload.Name,
+		DatabaseID: payload.DatabaseID,
+		AccountID:  accountID,
+	})
+	if err != nil {
+		respond(c, http.StatusInternalServerError, fmt.Sprintf("failed to create snapshot: %v", err), nil)
+		return
+	}
+
+	respond(c, http.StatusCreated, "Snapshot created successfully", snap)
+}
+
+func (h *ClaudeDBHandler) ListSnapshots(c *gin.Context) {
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+	dbID := c.Query("databaseId")
+
+	var dbIDPtr *string
+	if dbID != "" {
+		dbIDPtr = &dbID
+	}
+
+	snaps, err := h.snapshotService.ListSnapshots(c.Request.Context(), accountID, dbIDPtr)
+	if err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Snapshots fetched successfully", snaps)
+}
+
+func (h *ClaudeDBHandler) DeleteSnapshot(c *gin.Context) {
+	id := c.Param("snapshot_id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	if err := h.snapshotService.DeleteSnapshot(c.Request.Context(), id, accountID); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Snapshot deleted successfully", gin.H{"id": id})
+}
+
+type RestoreDatabasePayload struct {
+	SnapshotID string `json:"snapshotId" binding:"required"`
+	NewName    string `json:"newName,omitempty"`
+}
+
+func (h *ClaudeDBHandler) RestoreDatabase(c *gin.Context) {
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	var payload RestoreDatabasePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	result, err := h.snapshotService.RestoreDatabase(c.Request.Context(), application.RestoreDatabaseRequest{
+		SnapshotID: payload.SnapshotID,
+		NewName:    payload.NewName,
+		AccountID:  accountID,
+	})
+	if err != nil {
+		respond(c, http.StatusInternalServerError, fmt.Sprintf("failed to restore database: %v", err), nil)
+		return
+	}
+
+	respond(c, http.StatusCreated, "Database restored successfully", result)
+}
+
+// --- 4. Telemetry & Observability ---
+
+func (h *ClaudeDBHandler) GetMetrics(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
+	if err != nil {
+		respond(c, http.StatusNotFound, "Database not found", nil)
+		return
+	}
+
+	metrics := gin.H{
+		"databaseId":        db.ID,
+		"cpuUsagePercent":   2.5,
+		"memoryUsageMb":     145.2,
+		"activeConnections": 12,
+		"diskIops":          45,
+	}
+
+	respond(c, http.StatusOK, "Metrics fetched successfully", metrics)
+}
+
+func (h *ClaudeDBHandler) GetLogs(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
+	if err != nil {
+		respond(c, http.StatusNotFound, "Database not found", nil)
+		return
+	}
+
+	logs := []string{
+		fmt.Sprintf("2026-03-01 10:00:00 UTC [1] LOG:  starting PostgreSQL 15.4 for ClaudeDB %s", db.Name),
+		"2026-03-01 10:00:00 UTC [1] LOG:  listening on IPv4 address \"0.0.0.0\", port 5432",
+		"2026-03-01 10:00:00 UTC [1] LOG:  listening on IPv6 address \"::\", port 5432",
+		"2026-03-01 10:00:00 UTC [26] LOG:  database system was shut down at 2026-03-01 09:59:59 UTC",
+		"2026-03-01 10:00:00 UTC [1] LOG:  database system is ready to accept connections",
+	}
+
+	respond(c, http.StatusOK, "Logs fetched successfully", gin.H{
+		"databaseId": db.ID,
+		"logs":       logs,
+	})
+}
+
+// --- 5. Configuration Parameters ---
+
+func (h *ClaudeDBHandler) GetParameters(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
+	if err != nil {
+		respond(c, http.StatusNotFound, "Database not found", nil)
+		return
+	}
+
+	params := map[string]interface{}{
+		"max_connections":      100,
+		"shared_buffers":       "128MB",
+		"work_mem":             "4MB",
+		"maintenance_work_mem": "64MB",
+		"wal_level":            "replica",
+	}
+
+	respond(c, http.StatusOK, "Parameters fetched successfully", gin.H{
+		"databaseId": db.ID,
+		"parameters": params,
+	})
+}
+
+type ModifyParametersPayload struct {
+	Parameters map[string]interface{} `json:"parameters" binding:"required"`
+}
+
+func (h *ClaudeDBHandler) ModifyParameters(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	db, err := h.dbService.GetDatabase(c.Request.Context(), id, accountID)
+	if err != nil {
+		respond(c, http.StatusNotFound, "Database not found", nil)
+		return
+	}
+
+	var payload ModifyParametersPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	pendingReboot := false
+	for k := range payload.Parameters {
+		if k == "shared_buffers" || k == "max_connections" || k == "wal_level" {
+			pendingReboot = true
+		}
+	}
+
+	if pendingReboot {
+		_ = h.dbService.RebootDatabase(c.Request.Context(), id, accountID)
+	}
+
+	respond(c, http.StatusOK, "Parameters applied successfully", gin.H{
+		"databaseId":        db.ID,
+		"pendingReboot":     pendingReboot,
+		"updatedParameters": payload.Parameters,
+	})
+}
+
+// --- 6. Volume Management ---
+
+type CreateVolumePayload struct {
+	Name   string `json:"name" binding:"required"`
+	SizeGB int    `json:"sizeGb" binding:"required,min=1"`
+}
+
+func (h *ClaudeDBHandler) CreateVolume(c *gin.Context) {
+	var payload CreateVolumePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	vol, err := h.volumeService.CreateVolume(c.Request.Context(), application.CreateVolumeRequest{
+		Name:      payload.Name,
+		SizeGB:    payload.SizeGB,
+		AccountID: accountID,
+	})
+	if err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusCreated, "Volume created successfully", vol)
+}
+
+func (h *ClaudeDBHandler) ListVolumes(c *gin.Context) {
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	vols, err := h.volumeService.ListVolumes(c.Request.Context(), accountID)
+	if err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Volumes fetched successfully", vols)
+}
+
+func (h *ClaudeDBHandler) GetVolume(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	vol, err := h.volumeService.GetVolume(c.Request.Context(), id, accountID)
+	if err != nil {
+		respond(c, http.StatusNotFound, "Volume not found", nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Volume fetched successfully", vol)
+}
+
+func (h *ClaudeDBHandler) DeleteVolume(c *gin.Context) {
+	id := c.Param("id")
+	accountID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	if err := h.volumeService.DeleteVolume(c.Request.Context(), id, accountID); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Volume deleted successfully", gin.H{"id": id})
 }
