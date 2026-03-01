@@ -8,12 +8,12 @@ import (
 
 // HealthStatus represents the overall health status
 type HealthStatus struct {
-	Healthy      bool                   `json:"healthy"`
-	Database     ServiceHealth          `json:"database"`
-	Docker       ServiceHealth          `json:"docker"`
-	Timestamp    time.Time              `json:"timestamp"`
-	InstancesCount int                  `json:"instancesCount"`
-	Details      map[string]interface{} `json:"details,omitempty"`
+	Healthy        bool                   `json:"healthy"`
+	Database       ServiceHealth          `json:"database"`
+	Docker         ServiceHealth          `json:"docker"`
+	Timestamp      time.Time              `json:"timestamp"`
+	InstancesCount int                    `json:"instancesCount"`
+	Details        map[string]interface{} `json:"details,omitempty"`
 }
 
 // ServiceHealth represents the health of a specific service

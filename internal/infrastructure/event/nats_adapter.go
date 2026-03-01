@@ -35,6 +35,31 @@ func NewNATSAdapter(url string) (*NATSAdapter, error) {
 	}, nil
 }
 
+// NewNATSAdapterWithAuth creates a new NATS adapter with user authentication
+func NewNATSAdapterWithAuth(url, user, password string) (*NATSAdapter, error) {
+	conn, err := nats.Connect(url,
+		nats.UserInfo(user, password),
+		nats.MaxReconnects(-1), // Unlimited reconnects
+		nats.ReconnectWait(nats.DefaultReconnectWait),
+		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
+			if err != nil {
+				fmt.Printf("NATS disconnected: %v\n", err)
+			}
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			fmt.Printf("NATS reconnected to %s\n", nc.ConnectedUrl())
+		}),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to NATS with auth: %w", err)
+	}
+
+	return &NATSAdapter{
+		conn: conn,
+	}, nil
+}
+
 // GetConnection returns the underlying NATS connection
 func (n *NATSAdapter) GetConnection() *nats.Conn {
 	return n.conn

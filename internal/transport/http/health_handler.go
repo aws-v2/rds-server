@@ -23,12 +23,12 @@ func NewHealthHandler(healthService *application.HealthService) *HealthHandler {
 func (h *HealthHandler) Ping(c *gin.Context) {
 	if h.healthService.Ping(c.Request.Context()) {
 		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
+			"status":  "ok",
 			"message": "pong",
 		})
 	} else {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "error",
+			"status":  "error",
 			"message": "service unavailable",
 		})
 	}

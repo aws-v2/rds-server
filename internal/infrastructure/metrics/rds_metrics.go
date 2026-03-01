@@ -16,8 +16,8 @@ type RDSMetrics struct {
 	httpRequestDuration *prometheus.HistogramVec
 
 	// Instance Metrics
-	instancesTotal           prometheus.Gauge
-	instanceOperationsTotal  *prometheus.CounterVec
+	instancesTotal            prometheus.Gauge
+	instanceOperationsTotal   *prometheus.CounterVec
 	instanceOperationDuration *prometheus.HistogramVec
 
 	// Container Metrics

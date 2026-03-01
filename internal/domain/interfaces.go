@@ -21,18 +21,42 @@ type RepositoryPort interface {
 	GetConfiguration(ctx context.Context, instanceID string) ([]*Configuration, error)
 	SaveConfigHistory(ctx context.Context, history *ConfigHistory) error
 	GetConfigHistory(ctx context.Context, instanceID string) ([]*ConfigHistory, error)
+
+	// ClaudeDB Control Plane operations
+	CreateDatabaseTx(ctx context.Context, db *Database, cred *Credential, op *Operation) error
+	GetDatabase(ctx context.Context, id string) (*Database, error)
+	GetDatabaseByIdempotencyKey(ctx context.Context, accountID, idempotencyKey string) (*Database, error)
+	ListDatabases(ctx context.Context, accountID string) ([]*Database, error)
+	UpdateDatabaseStatus(ctx context.Context, id string, status DBStatus) error
+	DeleteDatabase(ctx context.Context, id string) error
+	GetActiveCredential(ctx context.Context, databaseID string) (*Credential, error)
+	// Volume operations
+	CreateVolume(ctx context.Context, vol *Volume) error
+	GetVolume(ctx context.Context, id string) (*Volume, error)
+	ListVolumes(ctx context.Context, accountID string) ([]*Volume, error)
+	UpdateVolumeStatus(ctx context.Context, id string, status VolumeStatus) error
+	DeleteVolume(ctx context.Context, id string) error
+
+	// Snapshot operations
+	CreateSnapshot(ctx context.Context, snap *Snapshot) error
+	GetSnapshot(ctx context.Context, id string) (*Snapshot, error)
+	ListSnapshots(ctx context.Context, accountID string, databaseID *string) ([]*Snapshot, error)
+	UpdateSnapshotStatus(ctx context.Context, id string, status SnapshotStatus) error
+	DeleteSnapshot(ctx context.Context, id string) error
 }
 
 // ContainerConfig represents the configuration for creating a Docker container
 type ContainerConfig struct {
-	Name        string
-	Image       string
-	Port        int
-	User        string
-	Password    string
-	OwnerID     string
-	Environment map[string]string
-	Labels      map[string]string
+	Name         string
+	Image        string
+	Port         int
+	User         string
+	Password     string
+	OwnerID      string
+	Environment  map[string]string
+	Labels       map[string]string
+	VolumeSource string
+	VolumeDest   string
 }
 
 // ContainerInfo represents information about a running container
@@ -51,4 +75,9 @@ type DockerPort interface {
 	RemoveContainer(ctx context.Context, containerID string) error
 	GetContainerStatus(ctx context.Context, containerID string) (string, error)
 	GetContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error)
+
+	// Docker Volume operations
+	CreateVolume(ctx context.Context, name string) error
+	RemoveVolume(ctx context.Context, name string) error
+	InspectVolume(ctx context.Context, name string) (map[string]interface{}, error)
 }

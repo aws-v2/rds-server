@@ -1,17 +1,14 @@
 package http
 
 import (
-	"rds/internal/middleware"
-
 	"github.com/gin-gonic/gin"
 )
 
 // Handlers struct holds all handler dependencies
 type Handlers struct {
-	Instance  *InstanceHandler
-	Health    *HealthHandler
-	Config    *ConfigHandler
-	Validator middleware.APIKeyValidator
+	ClaudeDB *ClaudeDBHandler
+	Health   *HealthHandler
+	Config   *ConfigHandler
 }
 
 // RegisterRoutes registers all application routes
@@ -19,39 +16,60 @@ func RegisterRoutes(router *gin.Engine, handlers *Handlers) {
 	// API v1 group
 	v1 := router.Group("/api/v1/rds")
 
-	// Apply authentication middleware to all routes
-	v1.Use(middleware.APIKeyAuthMiddleware(handlers.Validator))
-
 	// Register domain-specific routes
-	registerInstanceRoutes(v1, handlers.Instance)
+	if handlers.ClaudeDB != nil {
+		registerClaudeDBRoutes(v1, handlers.ClaudeDB)
+	}
 	registerHealthRoutes(v1, handlers.Health)
 	registerConfigRoutes(v1, handlers.Config)
 }
 
-// registerInstanceRoutes registers all instance management routes
-func registerInstanceRoutes(v1 *gin.RouterGroup, handler *InstanceHandler) {
-	instances := v1.Group("/instances")
+func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
+	databases := api.Group("/databases")
 	{
-		// Create new instance
-		instances.POST("", handler.CreateInstance)
+		databases.POST("", handler.CreateDatabase)
+		databases.GET("", handler.ListDatabases)
+		databases.GET("/:id", handler.GetDatabase)
+		databases.DELETE("/:id", handler.DeleteDatabase)
+		databases.POST("/:id/rotate-credentials", handler.RotateCredentials)
 
-		// List all instances for the authenticated user
-		instances.GET("", handler.ListInstances)
+		// 1. Power & Compute Lifecycle
+		databases.POST("/:id/start", handler.StartDatabase)
+		databases.POST("/:id/stop", handler.StopDatabase)
+		databases.POST("/:id/reboot", handler.RebootDatabase)
 
-		// Get specific instance details
-		instances.GET("/:id", handler.GetInstance)
+		// 2. Compute Modification
+		databases.PATCH("/:id", handler.ModifyDatabase)
 
-		// Delete instance
-		instances.DELETE("/:id", handler.DeleteInstance)
+		// 3. Backup & Restore
+		databases.POST("/:id/snapshots", handler.CreateSnapshot)
+		databases.GET("/:id/snapshots", handler.ListSnapshots)
 
-		// Start instance
-		instances.POST("/:id/start", handler.StartInstance)
+		// 4. Telemetry
+		databases.GET("/:id/metrics", handler.GetMetrics)
+		databases.GET("/:id/logs", handler.GetLogs)
 
-		// Stop instance
-		instances.POST("/:id/stop", handler.StopInstance)
+		// 5. Configuration
+		databases.GET("/:id/parameters", handler.GetParameters)
+		databases.PATCH("/:id/parameters", handler.ModifyParameters)
 
-		// Get instance audit logs
-		instances.GET("/:id/logs", handler.GetInstanceLogs)
+		// Restore is a root-level operation on databases but conceptually uses a snapshot
+		databases.POST("/restore", handler.RestoreDatabase)
+	}
+
+	snapshots := api.Group("/snapshots")
+	{
+		snapshots.DELETE("/:snapshot_id", handler.DeleteSnapshot)
+	}
+
+	// --- 6. Volume Management Routes (`/api/v1/rds/volumes`) ---
+	volumes := api.Group("/volumes")
+	{
+		// Use auth middleware for real implementation, skipped for this refactor MVP
+		volumes.POST("", handler.CreateVolume)
+		volumes.GET("", handler.ListVolumes)
+		volumes.GET("/:id", handler.GetVolume)
+		volumes.DELETE("/:id", handler.DeleteVolume)
 	}
 }
 

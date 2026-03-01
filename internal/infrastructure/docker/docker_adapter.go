@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
@@ -89,6 +90,12 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 		},
 	}
 
+	if cfg.VolumeSource != "" && cfg.VolumeDest != "" {
+		hostConfig.Binds = []string{
+			fmt.Sprintf("%s:%s", cfg.VolumeSource, cfg.VolumeDest),
+		}
+	}
+
 	// Create the container
 	resp, err := d.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, cfg.Name)
 	if err != nil {
@@ -151,6 +158,42 @@ func (d *DockerAdapter) GetContainerInfo(ctx context.Context, containerID string
 		Status: inspect.State.Status,
 		Port:   port,
 	}, nil
+}
+
+// CreateVolume creates a named Docker volume
+func (d *DockerAdapter) CreateVolume(ctx context.Context, name string) error {
+	_, err := d.client.VolumeCreate(ctx, volume.CreateOptions{
+		Name: name,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create docker volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// RemoveVolume removes a named Docker volume
+func (d *DockerAdapter) RemoveVolume(ctx context.Context, name string) error {
+	// Force remove the volume
+	err := d.client.VolumeRemove(ctx, name, true)
+	if err != nil {
+		return fmt.Errorf("failed to remove docker volume %s: %w", name, err)
+	}
+	return nil
+}
+
+// InspectVolume returns volume details
+func (d *DockerAdapter) InspectVolume(ctx context.Context, name string) (map[string]interface{}, error) {
+	vol, err := d.client.VolumeInspect(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect docker volume %s: %w", name, err)
+	}
+
+	result := map[string]interface{}{
+		"Name":       vol.Name,
+		"Mountpoint": vol.Mountpoint,
+		"CreatedAt":  vol.CreatedAt,
+	}
+	return result, nil
 }
 
 // Close closes the Docker client connection
