@@ -31,12 +31,12 @@ type EurekaConfig struct {
 func GetEurekaConfig() *EurekaConfig {
 	return &EurekaConfig{
 		ServerURL:         getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),
-		AppName:           getEnv("EUREKA_APP_NAME", "RDS-SERVER"), // Updated from LAMBDA-SERVICE
+		AppName:           getEnv("EUREKA_APP_NAME", "RDS-SERVICE"), // Updated from LAMBDA-SERVICE
 		HostName:          getEnv("EUREKA_HOSTNAME", "localhost"),
 		IPAddr:            getEnv("EUREKA_IP_ADDR", "127.0.0.1"),
 		Port:              getEnvInt("RDS_PORT", 8082), // Updated to match RDS port config
-		VipAddress:        getEnv("EUREKA_VIP_ADDRESS", "rds-server"),
-		InstanceID:        getEnv("EUREKA_INSTANCE_ID", "rds-server:8082"),
+		VipAddress:        getEnv("EUREKA_VIP_ADDRESS", "rds-service"),
+		InstanceID:        getEnv("EUREKA_INSTANCE_ID", "rds-service:8082"),
 		HeartbeatInterval: getEnvDuration("EUREKA_HEARTBEAT_INTERVAL", 30*time.Second),
 	}
 }

@@ -183,21 +183,13 @@ func (h *ClaudeDBHandler) GetDatabase(c *gin.Context) {
 		return
 	}
 
-	db, err := h.dbService.GetDatabase(c.Request.Context(), id, userID)
+	data, err := h.dbService.GetDatabaseWithConnectionString(c.Request.Context(), id, userID)
 	if err != nil {
 		respond(c, http.StatusInternalServerError, err.Error(), nil)
 		return
 	}
 
-	respond(c, http.StatusOK, "Database fetched successfully", gin.H{
-		"id":        db.ID,
-		"arn":       db.ARN,
-		"name":      db.Name,
-		"status":    db.Status,
-		"port":      db.NodePort,
-		"host":      db.NodeHost,
-		"createdAt": db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	})
+	respond(c, http.StatusOK, "Database fetched successfully", data)
 }
 
 func (h *ClaudeDBHandler) DeleteDatabase(c *gin.Context) {

@@ -244,6 +244,35 @@ func (s *ClaudeDBService) GetDatabase(ctx context.Context, id, accountID string)
 	return db, nil
 }
 
+// GetDatabaseWithConnectionString returns database details including the master connection string
+func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, id, accountID string) (map[string]interface{}, error) {
+	db, err := s.GetDatabase(ctx, id, accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	res := map[string]interface{}{
+		"id":             db.ID,
+		"arn":            db.ARN,
+		"name":           db.Name,
+		"status":         db.Status,
+		"port":           db.NodePort,
+		"host":           db.NodeHost,
+		"physicalDbName": db.PhysicalDBName,
+		"createdAt":      db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+
+	cred, err := s.repo.GetActiveCredential(ctx, id)
+	if err == nil && cred != nil {
+		connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, db.NodeHost, db.NodePort, db.PhysicalDBName)
+		res["connectionString"] = connStr
+		res["roleName"] = cred.RoleName
+		res["password"] = cred.EncryptedPassword
+	}
+
+	return res, nil
+}
+
 // DeleteDatabase decomposes the database and stops container
 func (s *ClaudeDBService) DeleteDatabase(ctx context.Context, id, accountID string) error {
 	db, err := s.repo.GetDatabase(ctx, id)

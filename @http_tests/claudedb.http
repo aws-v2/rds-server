@@ -9,7 +9,7 @@
 POST {{baseUrl}}/databases
 Content-Type: application/json
 Authorization: Bearer {{jwt}}
-Idempotency-Key: 123e4567-e89b-12d3-a456-426614174004
+Idempotency-Key: 123e4567-e89b-12d3-a456-42661417400F
 
 {
     "name": "production-api-db1gww",
@@ -31,7 +31,7 @@ Authorization: Bearer {{jwt}}
 
 ###
 # 3. Get Database Metadata by ID
-GET {{baseUrl}}/databases/{{dbId}}
+GET {{baseUrl}}/databases/66f2f385-85a3-46f8-abcf-afbcc2a0a3ec
 Content-Type: application/json
 Authorization: Bearer {{jwt}}
 
