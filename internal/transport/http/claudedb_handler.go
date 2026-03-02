@@ -4,8 +4,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
+	"time"
 
 	"rds/internal/application"
 	"rds/internal/domain"
@@ -468,6 +470,94 @@ func (h *ClaudeDBHandler) GetLogs(c *gin.Context) {
 		"databaseId": db.ID,
 		"logs":       logs,
 	})
+}
+
+func (h *ClaudeDBHandler) GetAggregateMetrics(c *gin.Context) {
+	userID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	dbs, err := h.dbService.ListDatabases(c.Request.Context(), userID)
+	if err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	// 1. Summary Metrics
+	var totalCPU float64
+	var totalMemory float64
+	var totalConnections int
+	var totalDisk float64
+
+	// 2. Breakdown for Bar Graphs (Per Database)
+	type DBMetric struct {
+		Name   string  `json:"name"`
+		CPU    float64 `json:"cpu"`
+		Memory float64 `json:"memory"`
+		Status string  `json:"status"`
+	}
+	breakdown := make([]DBMetric, 0, len(dbs))
+
+	for _, db := range dbs {
+		// Mocked per-DB metrics
+		cpu := 1.5 + math.Mod(float64(len(db.ID)), 5.0)
+		mem := 120.0 + (float64(len(db.Name)) * 10.0)
+		conn := 5 + (len(db.ID) % 20)
+		disk := 10.5 + math.Mod(float64(len(db.PhysicalDBName)), 15.0)
+
+		if db.Status == domain.DBStatusAvailable {
+			totalCPU += cpu
+			totalMemory += mem
+			totalConnections += conn
+			totalDisk += disk
+		}
+
+		breakdown = append(breakdown, DBMetric{
+			Name:   db.Name,
+			CPU:    cpu,
+			Memory: mem,
+			Status: string(db.Status),
+		})
+	}
+
+	// 3. History for Line Graphs (Simulated hourly data in 5-min intervals)
+	type DataPoint struct {
+		Timestamp string  `json:"timestamp"`
+		CPU       float64 `json:"cpu"`
+		Memory    float64 `json:"memory"`
+	}
+	history := make([]DataPoint, 0, 12)
+	now := time.Now().UTC()
+	for i := 11; i >= 0; i-- {
+		ts := now.Add(time.Duration(-i*5) * time.Minute)
+		// Add some jitter to make it look realistic
+		jitter := float64(i%3) * 0.5
+		history = append(history, DataPoint{
+			Timestamp: ts.Format(time.RFC3339),
+			CPU:       totalCPU - jitter,
+			Memory:    totalMemory - (jitter * 10),
+		})
+	}
+
+	metrics := gin.H{
+		"summary": gin.H{
+			"totalDatabases":   len(dbs),
+			"activeDatabases":  len(dbs), // Simplified
+			"totalCpuUsage":    totalCPU,
+			"totalMemoryUsage": totalMemory,
+			"totalConnections": totalConnections,
+			"totalDiskUsage":   totalDisk,
+			"unitCpu":          "%",
+			"unitMemory":       "MB",
+			"unitDisk":         "GB",
+		},
+		"breakdown": breakdown,
+		"history":   history,
+	}
+
+	respond(c, http.StatusOK, "Aggregate metrics fetched successfully", metrics)
 }
 
 // --- 5. Configuration Parameters ---

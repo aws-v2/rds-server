@@ -49,6 +49,9 @@ func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 		databases.GET("/:id/metrics", handler.GetMetrics)
 		databases.GET("/:id/logs", handler.GetLogs)
 
+		// 4b. Aggregated Telemetry
+		databases.GET("/metrics/aggregate", handler.GetAggregateMetrics)
+
 		// 5. Configuration
 		databases.GET("/:id/parameters", handler.GetParameters)
 		databases.PATCH("/:id/parameters", handler.ModifyParameters)
