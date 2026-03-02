@@ -122,6 +122,7 @@ func main() {
 	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, cfg.Server.Region)
 	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
 	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
+	docsService := application.NewDocsService("docs")
 
 	workerService := application.NewWorkerService(repo, dockerAdapter)
 	workerService.Start()
@@ -134,11 +135,13 @@ func main() {
 	claudeDBHandler := http.NewClaudeDBHandler(claudeDBService, volumeService, snapshotService, nil)
 	healthHandler := http.NewHealthHandler(healthService)
 	configHandler := http.NewConfigHandler(configService)
+	docsHandler := http.NewDocsHandler(docsService)
 
 	handlers := &http.Handlers{
 		ClaudeDB: claudeDBHandler,
 		Health:   healthHandler,
 		Config:   configHandler,
+		Docs:     docsHandler,
 	}
 
 	// 9. Setup router

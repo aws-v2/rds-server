@@ -9,6 +9,7 @@ type Handlers struct {
 	ClaudeDB *ClaudeDBHandler
 	Health   *HealthHandler
 	Config   *ConfigHandler
+	Docs     *DocsHandler
 }
 
 // RegisterRoutes registers all application routes
@@ -22,6 +23,7 @@ func RegisterRoutes(router *gin.Engine, handlers *Handlers) {
 	}
 	registerHealthRoutes(v1, handlers.Health)
 	registerConfigRoutes(v1, handlers.Config)
+	registerDocsRoutes(v1, handlers.Docs)
 }
 
 func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
@@ -91,4 +93,16 @@ func registerConfigRoutes(v1 *gin.RouterGroup, handler *ConfigHandler) {
 	v1.GET("/instances/:id/config", handler.GetConfiguration)
 	v1.PUT("/instances/:id/config", handler.SetConfiguration)
 	v1.GET("/instances/:id/config/history", handler.GetConfigurationHistory)
+}
+
+// registerDocsRoutes registers all documentation routes
+func registerDocsRoutes(v1 *gin.RouterGroup, handler *DocsHandler) {
+	if handler == nil {
+		return
+	}
+	docs := v1.Group("/docs")
+	{
+		docs.GET("", handler.GetManifest)
+		docs.GET("/:slug", handler.GetDocContent)
+	}
 }
