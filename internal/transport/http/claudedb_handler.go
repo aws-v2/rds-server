@@ -158,6 +158,8 @@ func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 		ARN       string          `json:"arn"`
 		Name      string          `json:"name"`
 		Port      int             `json:"port"`
+		VpcID     string          `json:"vpc_id"`
+		PrivateIP string          `json:"private_ip"`
 		Status    domain.DBStatus `json:"status"`
 		CreatedAt string          `json:"createdAt"`
 	}
@@ -169,6 +171,8 @@ func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 			ARN:       db.ARN,
 			Name:      db.Name,
 			Port:      db.NodePort,
+			VpcID:     db.VPCID,
+			PrivateIP: db.PrivateIP,
 			Status:    db.Status,
 			CreatedAt: db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})

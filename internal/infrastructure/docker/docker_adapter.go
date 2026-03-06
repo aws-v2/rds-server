@@ -8,6 +8,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
@@ -67,27 +68,42 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 		labels[key] = value
 	}
 
-	// Container port configuration
-	containerPort := "5432/tcp"
+	// Container configuration
 	containerConfig := &container.Config{
-		Image: cfg.Image,
-		Env:   env,
-		ExposedPorts: nat.PortSet{
-			nat.Port(containerPort): struct{}{},
-		},
+		Image:  cfg.Image,
+		Env:    env,
 		Labels: labels,
 	}
 
-	// Host port configuration
-	hostConfig := &container.HostConfig{
-		PortBindings: nat.PortMap{
+	hostConfig := &container.HostConfig{}
+	var networkingConfig *network.NetworkingConfig
+
+	if cfg.BridgeName != "" && cfg.PrivateIP != "" {
+		// VPC Networking: Attach directly to the bridge with a static IP
+		hostConfig.NetworkMode = container.NetworkMode(cfg.BridgeName)
+		networkingConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				cfg.BridgeName: {
+					IPAMConfig: &network.EndpointIPAMConfig{
+						IPv4Address: cfg.PrivateIP,
+					},
+				},
+			},
+		}
+	} else {
+		// Classic Port Binding: Fallback for local dev
+		containerPort := "5432/tcp"
+		containerConfig.ExposedPorts = nat.PortSet{
+			nat.Port(containerPort): struct{}{},
+		}
+		hostConfig.PortBindings = nat.PortMap{
 			nat.Port(containerPort): []nat.PortBinding{
 				{
 					HostIP:   "0.0.0.0",
 					HostPort: fmt.Sprintf("%d", cfg.Port),
 				},
 			},
-		},
+		}
 	}
 
 	if cfg.VolumeSource != "" && cfg.VolumeDest != "" {
@@ -97,7 +113,7 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 	}
 
 	// Create the container
-	resp, err := d.client.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, cfg.Name)
+	resp, err := d.client.ContainerCreate(ctx, containerConfig, hostConfig, networkingConfig, nil, cfg.Name)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}

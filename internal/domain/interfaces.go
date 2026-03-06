@@ -57,6 +57,9 @@ type ContainerConfig struct {
 	Labels       map[string]string
 	VolumeSource string
 	VolumeDest   string
+	PrivateIP    string // e.g. "10.1.2.5" — allocated by network service
+	BridgeName   string // e.g. "br-vpc-19b72a7e" — tenant's VPC bridge
+	Gateway      string // e.g. "10.1.2.1"
 }
 
 // ContainerInfo represents information about a running container

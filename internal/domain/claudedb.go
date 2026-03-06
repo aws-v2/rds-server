@@ -27,6 +27,8 @@ type Database struct {
 	NodeHost       string
 	NodePort       int
 	Status         DBStatus
+	PrivateIP      string // the container's private IP on the VPC
+	VPCID          string // which VPC this database belongs to
 	IdempotencyKey *string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time

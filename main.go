@@ -13,6 +13,7 @@ import (
 	"rds/internal/infrastructure/event"
 	"rds/internal/infrastructure/repository"
 	"rds/internal/logger"
+	"rds/internal/messaging"
 	"rds/internal/transport/http"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +55,18 @@ func main() {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer natsAdapter.Close()
+
+	// 1.1 Initialize NATS Publisher for Network Service
+	var natsPublisher *messaging.NATSPublisher
+	if cfg.NATS.URL != "" {
+		logger.Log.Info("Initializing NATS Publisher", zap.String("url", cfg.NATS.URL))
+		natsPublisher, err = messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password)
+		if err != nil {
+			logger.Log.Error("Failed to initialize NATS Publisher", zap.Error(err))
+		} else {
+			defer natsPublisher.Close()
+		}
+	}
 
 	// 2. Connect to PostgreSQL with Retries
 	dbConfig := database.Config{
@@ -119,7 +132,7 @@ func main() {
 	auditService := application.NewAuditService(repo)
 	healthService := application.NewHealthService(repo, dockerAdapter)
 	configService := application.NewConfigService(repo, auditService)
-	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, cfg.Server.Region)
+	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, natsPublisher, cfg.Server.Region)
 	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
 	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
 	docsService := application.NewDocsService("docs")

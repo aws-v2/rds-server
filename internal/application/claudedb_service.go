@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"rds/internal/domain"
+	"rds/internal/messaging"
 	"rds/internal/utils"
 
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ type CreateDatabaseRequest struct {
 	User           string
 	Password       string
 	OwnerID        string
+	VPCID          string
 	IdempotencyKey string
 }
 
@@ -47,14 +49,16 @@ type CreateDatabaseResponse struct {
 type ClaudeDBService struct {
 	repo         domain.RepositoryPort
 	dockerClient domain.DockerPort
+	publisher    messaging.Publisher
 	region       string
 }
 
 // NewClaudeDBService creates a new ClaudeDB application service
-func NewClaudeDBService(repo domain.RepositoryPort, dockerClient domain.DockerPort, region string) *ClaudeDBService {
+func NewClaudeDBService(repo domain.RepositoryPort, dockerClient domain.DockerPort, publisher messaging.Publisher, region string) *ClaudeDBService {
 	return &ClaudeDBService{
 		repo:         repo,
 		dockerClient: dockerClient,
+		publisher:    publisher,
 		region:       region,
 	}
 }
@@ -126,7 +130,34 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	if password == "" {
 		password = generateRandomHex(16) // 32 characters secure password
 	}
-	nodeHost := "localhost" // Current EC2 host IP or internal DNS
+	var privateIP, gateway, bridgeName, vpcID string
+	if s.publisher != nil {
+		if req.VPCID != "" {
+			vpcID = req.VPCID
+		} else {
+			vID, _, err := s.publisher.GetDefaultVPC(req.OwnerID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get default VPC: %w", err)
+			}
+			vpcID = vID
+		}
+
+		pIP, gw, br, err := s.publisher.PrepareInstanceNetwork(req.OwnerID, dbID, vpcID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare instance network: %w", err)
+		}
+		privateIP = pIP
+		gateway = gw
+		bridgeName = br
+
+		log.Printf("[VPC] RDS instance %s assigned to VPC %s (bridge: %s, IP: %s)",
+			dbID, vpcID, bridgeName, privateIP)
+	}
+
+	nodeHost := privateIP
+	if nodeHost == "" {
+		nodeHost = "localhost" // Fallback
+	}
 
 	var idempotencyKeyPtr *string
 	if req.IdempotencyKey != "" {
@@ -141,6 +172,8 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		Name:           req.Name,
 		PhysicalDBName: physicalDBName,
 		NodeHost:       nodeHost,
+		PrivateIP:      privateIP,
+		VPCID:          vpcID,
 		Status:         domain.DBStatusProvisioning,
 		IdempotencyKey: idempotencyKeyPtr,
 	}
@@ -158,12 +191,18 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	}
 
 	if err := s.repo.CreateDatabaseTx(ctx, dbEntity, credEntity, opEntity); err != nil {
+		if s.publisher != nil {
+			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
+		}
 		return nil, fmt.Errorf("failed to save initial state: %w", err)
 	}
 
 	// 5. Execute on Data Plane (Docker Orchestration)
 	image := "docker.io/library/postgres:15-alpine"
 	if err := s.dockerClient.PullImage(ctx, image); err != nil {
+		if s.publisher != nil {
+			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
+		}
 		_ = s.repo.UpdateDatabaseStatus(ctx, dbEntity.ID, domain.DBStatusFailed)
 		return nil, fmt.Errorf("failed to pull postgres image: %w", err)
 	}
@@ -183,15 +222,24 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		Labels: map[string]string{
 			"service": "claudedb-tenant",
 		},
+		PrivateIP:  privateIP,
+		BridgeName: bridgeName,
+		Gateway:    gateway,
 	}
 
 	containerID, err := s.dockerClient.CreateContainer(ctx, containerConfig)
 	if err != nil {
+		if s.publisher != nil {
+			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
+		}
 		_ = s.repo.UpdateDatabaseStatus(ctx, dbEntity.ID, domain.DBStatusFailed)
 		return nil, fmt.Errorf("failed to create docker container: %w", err)
 	}
 
 	if err := s.dockerClient.StartContainer(ctx, containerID); err != nil {
+		if s.publisher != nil {
+			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
+		}
 		_ = s.dockerClient.RemoveContainer(ctx, containerID)
 		_ = s.repo.UpdateDatabaseStatus(ctx, dbEntity.ID, domain.DBStatusFailed)
 		return nil, fmt.Errorf("failed to start database container: %w", err)
@@ -212,7 +260,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	// Update Operation status too (ideally in the repository layer, skipping for brevity)
 
 	// 8. Return Response
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", roleName, password, nodeHost, dbEntity.NodePort, physicalDBName)
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", roleName, password, nodeHost, physicalDBName)
 
 	return &CreateDatabaseResponse{
 		DatabaseID:       dbEntity.ID,
@@ -251,20 +299,29 @@ func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, i
 		return nil, err
 	}
 
+	host := db.NodeHost
+	port := db.NodePort
+	if db.PrivateIP != "" {
+		host = db.PrivateIP
+		port = 5432
+	}
+
 	res := map[string]interface{}{
 		"id":             db.ID,
 		"arn":            db.ARN,
 		"name":           db.Name,
 		"status":         db.Status,
-		"port":           db.NodePort,
-		"host":           db.NodeHost,
+		"port":           port,
+		"host":           host,
+		"vpc_id":         db.VPCID,
+		"private_ip":     db.PrivateIP,
 		"physicalDbName": db.PhysicalDBName,
 		"createdAt":      db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
 	cred, err := s.repo.GetActiveCredential(ctx, id)
 	if err == nil && cred != nil {
-		connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, db.NodeHost, db.NodePort, db.PhysicalDBName)
+		connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, host, port, db.PhysicalDBName)
 		res["connectionString"] = connStr
 		res["roleName"] = cred.RoleName
 		res["password"] = cred.EncryptedPassword
