@@ -35,15 +35,16 @@ type CreateDatabaseRequest struct {
 
 // CreateDatabaseResponse represents the result of the provisioning flow
 type CreateDatabaseResponse struct {
-	DatabaseID       string
-	ARN              string
-	Name             string
-	NodeHost         string
-	NodePort         int
-	RoleName         string
-	Password         string
-	PhysicalDBName   string
-	ConnectionString string
+	DatabaseID             string
+	ARN                    string
+	Name                   string
+	NodeHost               string
+	NodePort               int
+	RoleName               string
+	Password               string
+	PhysicalDBName         string
+	ConnectionString       string
+	PublicConnectionString string
 }
 
 type ClaudeDBService struct {
@@ -51,15 +52,17 @@ type ClaudeDBService struct {
 	dockerClient domain.DockerPort
 	publisher    messaging.Publisher
 	region       string
+	publicHostIP string
 }
 
 // NewClaudeDBService creates a new ClaudeDB application service
-func NewClaudeDBService(repo domain.RepositoryPort, dockerClient domain.DockerPort, publisher messaging.Publisher, region string) *ClaudeDBService {
+func NewClaudeDBService(repo domain.RepositoryPort, dockerClient domain.DockerPort, publisher messaging.Publisher, region, publicHostIP string) *ClaudeDBService {
 	return &ClaudeDBService{
 		repo:         repo,
 		dockerClient: dockerClient,
 		publisher:    publisher,
 		region:       region,
+		publicHostIP: publicHostIP,
 	}
 }
 
@@ -257,21 +260,40 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		log.Printf("CRITICAL: Failed to update database %s status to AVAILABLE: %v", dbEntity.ID, err)
 	}
 
-	// Update Operation status too (ideally in the repository layer, skipping for brevity)
+	log.Printf("[RDS] Saved database %s — private_ip=%s vpc_id=%s",
+		dbEntity.ID, dbEntity.PrivateIP, dbEntity.VPCID)
 
-	// 8. Return Response
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", roleName, password, nodeHost, physicalDBName)
+	// 8. Expose via NAT if publisher is available and we have a public host IP
+	var publicPort int
+	if s.publisher != nil && s.publicHostIP != "" {
+		log.Printf("[RDS] Exposing database %s publicly via NAT (public_ip=%s)", dbEntity.ID, s.publicHostIP)
+		pPort, exposeErr := s.publisher.ExposeDatabase(req.OwnerID, dbEntity.ID, privateIP, s.publicHostIP, 5432)
+		if exposeErr != nil {
+			log.Printf("[RDS] WARNING: Failed to expose database %s publicly: %v — private access still works", dbEntity.ID, exposeErr)
+		} else {
+			publicPort = pPort
+			log.Printf("[RDS] Database %s exposed publicly on %s:%d", dbEntity.ID, s.publicHostIP, publicPort)
+		}
+	}
+
+	// 9. Return Response
+	privateConnStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", roleName, password, nodeHost, physicalDBName)
+	publicConnStr := ""
+	if publicPort > 0 {
+		publicConnStr = fmt.Sprintf("postgres://%s:%s@%s:%d/%s", roleName, password, s.publicHostIP, publicPort, physicalDBName)
+	}
 
 	return &CreateDatabaseResponse{
-		DatabaseID:       dbEntity.ID,
-		ARN:              dbEntity.ARN,
-		Name:             req.Name,
-		NodeHost:         nodeHost,
-		NodePort:         dbEntity.NodePort,
-		RoleName:         roleName,
-		Password:         password,
-		PhysicalDBName:   physicalDBName,
-		ConnectionString: connStr,
+		DatabaseID:             dbEntity.ID,
+		ARN:                    dbEntity.ARN,
+		Name:                   req.Name,
+		NodeHost:               nodeHost,
+		NodePort:               dbEntity.NodePort,
+		RoleName:               roleName,
+		Password:               password,
+		PhysicalDBName:         physicalDBName,
+		ConnectionString:       privateConnStr,
+		PublicConnectionString: publicConnStr,
 	}, nil
 }
 
@@ -340,9 +362,17 @@ func (s *ClaudeDBService) DeleteDatabase(ctx context.Context, id, accountID stri
 		return fmt.Errorf("unauthorized")
 	}
 
+	// Unexpose before removing the container
+	if s.publisher != nil {
+		if unexposeErr := s.publisher.UnexposeDatabase(id); unexposeErr != nil {
+			log.Printf("[RDS] WARNING: Failed to unexpose database %s before deletion: %v — continuing with deletion", id, unexposeErr)
+		} else {
+			log.Printf("[RDS] Successfully unexposed database %s", id)
+		}
+	}
+
 	containerName := fmt.Sprintf("claudedb-prod-%s", db.ID)
-	// Stop and remove container by name (docker API uses name optionally if ID not found directly, or we fetch ID)
-	// We'll trust the adapter will stop/remove by name or we need to find it by labels. Wait, Docker ID vs Name!
+	// Stop and remove container by name (docker API uses name optionally if ID not found directly, or we fetch ID by labels. Wait, Docker ID vs Name!
 	// In the real system we should save ContainerID, but docker removes by Name too.
 
 	// Temporarily ignore stop/remove errors in case container is already gone.

@@ -47,10 +47,11 @@ type NATSConfig struct {
 }
 
 type ServerConfig struct {
-	Port        string
-	ServiceName string
-	StoragePath string
-	Region      string
+	Port         string
+	ServiceName  string
+	StoragePath  string
+	Region       string
+	PublicHostIP string
 }
 
 type EurekaConfig struct {
@@ -77,10 +78,11 @@ func Load() (*Config, error) {
 			Password: getEnv("NATS_PASSWORD", "auth-secret"),
 		},
 		Server: ServerConfig{
-			Port:        getEnv("RDS_PORT", "8082"), // Keeping existing RDS conventions here
-			ServiceName: getEnv("SERVICE_NAME", "rds-server"),
-			StoragePath: getEnv("CODE_STORAGE_PATH", "./storage"),
-			Region:      getEnv("AWS_REGION", "eu-north-1"),
+			Port:         getEnv("RDS_PORT", "8082"), // Keeping existing RDS conventions here
+			ServiceName:  getEnv("SERVICE_NAME", "rds-server"),
+			StoragePath:  getEnv("CODE_STORAGE_PATH", "./storage"),
+			Region:       getEnv("AWS_REGION", "eu-north-1"),
+			PublicHostIP: getEnv("PUBLIC_HOST_IP", ""),
 		},
 		Eureka: EurekaConfig{
 			ServerURL: getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"rds/internal/domain"
 
 	"github.com/docker/docker/api/types/container"
@@ -50,6 +51,9 @@ func (d *DockerAdapter) PullImage(ctx context.Context, imageq string) error {
 
 // CreateContainer creates a new Docker container
 func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.ContainerConfig) (string, error) {
+	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s",
+		cfg.Name, cfg.BridgeName, cfg.PrivateIP)
+
 	// Prepare environment variables
 	env := []string{
 		fmt.Sprintf("POSTGRES_USER=%s", cfg.User),

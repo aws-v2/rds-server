@@ -15,6 +15,8 @@ type Publisher interface {
 	PrepareInstanceNetwork(tenantID, resourceID, vpcID string) (privateIP, gateway, bridgeName string, err error)
 	ReleaseInstanceNetwork(tenantID, resourceID, vpcID string) error
 	GetDefaultVPC(tenantID string) (vpcID, bridgeName string, err error)
+	ExposeDatabase(tenantID, resourceID, privateIP, publicIP string, privatePort int) (publicPort int, err error)
+	UnexposeDatabase(resourceID string) error
 }
 
 // NATSPublisher implements the Publisher interface using NATS Request-Response pattern.
@@ -57,6 +59,31 @@ type vpcGetDefaultResponse struct {
 	VpcID         string `json:"vpc_id"`
 	BridgeName    string `json:"bridge_name"`
 	CorrelationID string `json:"correlation_id"`
+}
+
+type exposeRDSRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	TenantID      string `json:"tenant_id"`
+	ResourceID    string `json:"resource_id"`
+	PrivateIP     string `json:"private_ip"`
+	PrivatePort   int    `json:"private_port"`
+	PublicIP      string `json:"public_ip"`
+}
+
+type exposeRDSResponse struct {
+	Success    bool   `json:"success"`
+	PublicPort int    `json:"public_port"`
+	Error      string `json:"error"`
+}
+
+type unexposeRDSRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	ResourceID    string `json:"resource_id"`
+}
+
+type unexposeRDSResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error"`
 }
 
 // NewNATSPublisher connects to NATS and returns a NATSPublisher instance.
@@ -181,4 +208,74 @@ func (p *NATSPublisher) Close() {
 	if p.nc != nil {
 		p.nc.Close()
 	}
+}
+
+// ExposeDatabase sends a request to the Network Service to expose an RDS container publicly via DNAT/SNAT.
+func (p *NATSPublisher) ExposeDatabase(tenantID, resourceID, privateIP, publicIP string, privatePort int) (int, error) {
+	correlationID := uuid.New().String()
+	req := exposeRDSRequest{
+		CorrelationID: correlationID,
+		TenantID:      tenantID,
+		ResourceID:    resourceID,
+		PrivateIP:     privateIP,
+		PrivatePort:   privatePort,
+		PublicIP:      publicIP,
+	}
+
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	log.Printf("[RDS-NATS] Sending ExposeDatabase request: %s", string(reqData))
+
+	msg, err := p.nc.Request("dev.network.v1.rds.expose", reqData, 5*time.Second)
+	if err != nil {
+		return 0, fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] Received ExposeDatabase response: %s", string(msg.Data))
+
+	var resp exposeRDSResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !resp.Success {
+		return 0, fmt.Errorf("expose database failed: %s", resp.Error)
+	}
+
+	return resp.PublicPort, nil
+}
+
+// UnexposeDatabase sends a request to the Network Service to remove NAT rules and release the public port.
+func (p *NATSPublisher) UnexposeDatabase(resourceID string) error {
+	correlationID := uuid.New().String()
+	req := unexposeRDSRequest{
+		CorrelationID: correlationID,
+		ResourceID:    resourceID,
+	}
+
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+	log.Printf("[RDS-NATS] Sending UnexposeDatabase request: %s", string(reqData))
+
+	msg, err := p.nc.Request("dev.network.v1.rds.unexpose", reqData, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] Received UnexposeDatabase response: %s", string(msg.Data))
+
+	var resp unexposeRDSResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("unexpose database failed: %s", resp.Error)
+	}
+
+	return nil
 }

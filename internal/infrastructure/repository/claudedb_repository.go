@@ -34,8 +34,8 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 			SELECT node_port FROM databases WHERE node_host = $1
 			ORDER BY port LIMIT 1
 		)
-		INSERT INTO databases (id, account_id, arn, name, physical_db_name, node_host, node_port, status, idempotency_key, created_at, updated_at)
-		VALUES ($2, $3, $8, $4, $5, $1, (SELECT port FROM available_port), $6, $7, NOW(), NOW())
+		INSERT INTO databases (id, account_id, arn, name, physical_db_name, node_host, node_port, private_ip, vpc_id, status, idempotency_key, created_at, updated_at)
+		VALUES ($2, $3, $8, $4, $5, $1, (SELECT port FROM available_port), $9, $10, $6, $7, NOW(), NOW())
 		RETURNING node_port, created_at, updated_at
 	`
 
@@ -48,6 +48,8 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 		db.Status,         // $6
 		idempotencyVal,    // $7
 		db.ARN,            // $8
+		db.PrivateIP,      // $9
+		db.VPCID,          // $10
 	).Scan(&db.NodePort, &db.CreatedAt, &db.UpdatedAt)
 
 	if err != nil {

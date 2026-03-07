@@ -132,7 +132,7 @@ func main() {
 	auditService := application.NewAuditService(repo)
 	healthService := application.NewHealthService(repo, dockerAdapter)
 	configService := application.NewConfigService(repo, auditService)
-	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, natsPublisher, cfg.Server.Region)
+	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, natsPublisher, cfg.Server.Region, cfg.Server.PublicHostIP)
 	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
 	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
 	docsService := application.NewDocsService("docs")
