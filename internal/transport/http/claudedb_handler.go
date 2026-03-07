@@ -140,6 +140,47 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 	respond(c, http.StatusCreated, "Database provisioned successfully", resp)
 }
 
+type CreateVPCPayload struct {
+	Name string `json:"name" binding:"required"`
+}
+
+func (h *ClaudeDBHandler) CreateVPC(c *gin.Context) {
+	var payload CreateVPCPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	userID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	if err := h.dbService.CreateVPC(c.Request.Context(), userID, payload.Name); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusAccepted, "VPC creation request submitted successfully", nil)
+}
+
+func (h *ClaudeDBHandler) ListVPCs(c *gin.Context) {
+	userID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	vpcs, err := h.dbService.ListVPCs(c.Request.Context(), userID)
+	if err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "VPCs fetched successfully", vpcs)
+}
+
 func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 	userID, err := extractAccountID(c)
 	if err != nil {

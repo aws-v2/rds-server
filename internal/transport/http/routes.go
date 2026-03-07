@@ -67,6 +67,12 @@ func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 		snapshots.DELETE("/:snapshot_id", handler.DeleteSnapshot)
 	}
 
+	vpcs := api.Group("/vpcs")
+	{
+		vpcs.GET("", handler.ListVPCs)
+		vpcs.POST("", handler.CreateVPC)
+	}
+
 	// --- 6. Volume Management Routes (`/api/v1/rds/volumes`) ---
 	volumes := api.Group("/volumes")
 	{

@@ -312,6 +312,22 @@ func (s *ClaudeDBService) ListDatabases(ctx context.Context, accountID string) (
 	return s.repo.ListDatabases(ctx, accountID)
 }
 
+// ListVPCs returns all VPCs for an account by querying the network service
+func (s *ClaudeDBService) ListVPCs(ctx context.Context, accountID string) ([]domain.VPC, error) {
+	if s.publisher == nil {
+		return nil, fmt.Errorf("network service publisher is not configured")
+	}
+	return s.publisher.ListVPCs(accountID)
+}
+
+// CreateVPC dispatches a request to create a VPC
+func (s *ClaudeDBService) CreateVPC(ctx context.Context, accountID, vpcName string) error {
+	if s.publisher == nil {
+		return fmt.Errorf("network service publisher is not configured")
+	}
+	return s.publisher.CreateVPC(accountID, vpcName, accountID)
+}
+
 // GetDatabase get database details
 func (s *ClaudeDBService) GetDatabase(ctx context.Context, id, accountID string) (*domain.Database, error) {
 	db, err := s.repo.GetDatabase(ctx, id)
