@@ -191,6 +191,19 @@ func (r *PostgresRepository) UpdateDatabaseStatus(ctx context.Context, id string
 	return nil
 }
 
+func (r *PostgresRepository) UpdateDatabasePublicPort(ctx context.Context, id string, publicPort int) error {
+	query := `UPDATE databases SET public_port = $1, updated_at = NOW() WHERE id = $2`
+	res, err := r.db.ExecContext(ctx, query, publicPort, id)
+	if err != nil {
+		return fmt.Errorf("failed to update database public port: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PostgresRepository) DeleteDatabase(ctx context.Context, id string) error {
 	query := `UPDATE databases SET status = 'DELETED', deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	res, err := r.db.ExecContext(ctx, query, id)

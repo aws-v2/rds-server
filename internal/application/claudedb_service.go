@@ -278,6 +278,11 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		} else {
 			publicPort = pPort
 			log.Printf("[RDS] Database %s exposed publicly on %s:%d", dbEntity.ID, s.publicHostIP, publicPort)
+
+			// Persist public port to database record
+			if err := s.repo.UpdateDatabasePublicPort(ctx, dbEntity.ID, publicPort); err != nil {
+				log.Printf("[RDS] WARNING: Failed to save public port for database %s: %v", dbEntity.ID, err)
+			}
 		}
 	}
 

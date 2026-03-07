@@ -82,7 +82,7 @@ func Load() (*Config, error) {
 			ServiceName:  getEnv("SERVICE_NAME", "rds-server"),
 			StoragePath:  getEnv("CODE_STORAGE_PATH", "./storage"),
 			Region:       getEnv("AWS_REGION", "eu-north-1"),
-			PublicHostIP: getEnv("PUBLIC_HOST_IP", ""),
+			PublicHostIP: getEnv("PUBLIC_HOST_IP", "192.168.1.7"),
 		},
 		Eureka: EurekaConfig{
 			ServerURL: getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),

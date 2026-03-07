@@ -28,6 +28,7 @@ type RepositoryPort interface {
 	GetDatabaseByIdempotencyKey(ctx context.Context, accountID, idempotencyKey string) (*Database, error)
 	ListDatabases(ctx context.Context, accountID string) ([]*Database, error)
 	UpdateDatabaseStatus(ctx context.Context, id string, status DBStatus) error
+	UpdateDatabasePublicPort(ctx context.Context, id string, publicPort int) error
 	DeleteDatabase(ctx context.Context, id string) error
 	GetActiveCredential(ctx context.Context, databaseID string) (*Credential, error)
 	// Volume operations
