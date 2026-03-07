@@ -98,13 +98,17 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 			if err != nil {
 				return nil, fmt.Errorf("failed to retrieve credentials for existing idempotent creation")
 			}
-			connStr := fmt.Sprintf("postgres://%s:***@%s:%d/%s", cred.RoleName, existingDB.NodeHost, existingDB.NodePort, existingDB.PhysicalDBName)
+			host := existingDB.NodeHost
+			if existingDB.PrivateIP != "" {
+				host = existingDB.PrivateIP
+			}
+			connStr := fmt.Sprintf("postgres://%s:***@%s:5432/%s", cred.RoleName, host, existingDB.PhysicalDBName)
 			return &CreateDatabaseResponse{
 				DatabaseID:       existingDB.ID,
 				ARN:              existingDB.ARN,
 				Name:             existingDB.Name,
-				NodeHost:         existingDB.NodeHost,
-				NodePort:         existingDB.NodePort,
+				NodeHost:         host,
+				NodePort:         5432,
 				RoleName:         cred.RoleName,
 				Password:         "***", // Don't return password twice.
 				PhysicalDBName:   existingDB.PhysicalDBName,
@@ -167,7 +171,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		idempotencyKeyPtr = &req.IdempotencyKey
 	}
 
-	// 4. Perist Intended State (Control DB Transaction, Gap-Finder for ports)
+	// 4. Persist Intended State
 	dbEntity := &domain.Database{
 		ID:             dbID,
 		AccountID:      req.OwnerID,
@@ -175,6 +179,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		Name:           req.Name,
 		PhysicalDBName: physicalDBName,
 		NodeHost:       nodeHost,
+		NodePort:       5432,
 		PrivateIP:      privateIP,
 		VPCID:          vpcID,
 		Status:         domain.DBStatusProvisioning,
@@ -213,7 +218,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	containerConfig := domain.ContainerConfig{
 		Name:         fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
 		Image:        image,
-		Port:         dbEntity.NodePort,
+		Port:         5432,
 		User:         roleName,
 		Password:     password,
 		OwnerID:      req.OwnerID,
@@ -337,14 +342,25 @@ func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, i
 		"host":           host,
 		"vpc_id":         db.VPCID,
 		"private_ip":     db.PrivateIP,
+		"public_port":    db.PublicPort,
 		"physicalDbName": db.PhysicalDBName,
 		"createdAt":      db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 
 	cred, err := s.repo.GetActiveCredential(ctx, id)
 	if err == nil && cred != nil {
-		connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, host, port, db.PhysicalDBName)
-		res["connectionString"] = connStr
+		// Private connection string (for use within VPC / EC2)
+		privateConnStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, host, port, db.PhysicalDBName)
+		res["connectionString"] = privateConnStr
+
+		// Public connection string (for external access via NAT)
+		if db.PublicPort > 0 && s.publicHostIP != "" {
+			publicConnStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, s.publicHostIP, db.PublicPort, db.PhysicalDBName)
+			res["publicConnectionString"] = publicConnStr
+		} else {
+			res["publicConnectionString"] = ""
+		}
+
 		res["roleName"] = cred.RoleName
 		res["password"] = cred.EncryptedPassword
 	}
@@ -384,6 +400,7 @@ func (s *ClaudeDBService) DeleteDatabase(ctx context.Context, id, accountID stri
 		return fmt.Errorf("failed to mark database as deleted: %w", err)
 	}
 
+	log.Printf("[RDS] Database %s deleted and port released successfully", id)
 	return nil
 }
 
@@ -400,14 +417,18 @@ func (s *ClaudeDBService) RotateCredentials(ctx context.Context, id, accountID s
 	newRoleName := fmt.Sprintf("role_%s_v2", generateRandomHex(4))
 
 	// Fake rotate success
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", newRoleName, newPassword, db.NodeHost, db.NodePort, db.PhysicalDBName)
+	host := db.NodeHost
+	if db.PrivateIP != "" {
+		host = db.PrivateIP
+	}
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", newRoleName, newPassword, host, db.PhysicalDBName)
 
 	return &CreateDatabaseResponse{
 		DatabaseID:       db.ID,
 		ARN:              db.ARN,
 		Name:             db.Name,
-		NodeHost:         db.NodeHost,
-		NodePort:         db.NodePort,
+		NodeHost:         host,
+		NodePort:         5432,
 		RoleName:         newRoleName,
 		Password:         newPassword,
 		PhysicalDBName:   db.PhysicalDBName,

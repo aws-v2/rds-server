@@ -154,27 +154,33 @@ func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {
 	}
 
 	type DBSummary struct {
-		ID        string          `json:"id"`
-		ARN       string          `json:"arn"`
-		Name      string          `json:"name"`
-		Port      int             `json:"port"`
-		VpcID     string          `json:"vpc_id"`
-		PrivateIP string          `json:"private_ip"`
-		Status    domain.DBStatus `json:"status"`
-		CreatedAt string          `json:"createdAt"`
+		ID         string          `json:"id"`
+		ARN        string          `json:"arn"`
+		Name       string          `json:"name"`
+		Port       int             `json:"port"`
+		PublicPort int             `json:"public_port"`
+		VpcID      string          `json:"vpc_id"`
+		PrivateIP  string          `json:"private_ip"`
+		Status     domain.DBStatus `json:"status"`
+		CreatedAt  string          `json:"createdAt"`
 	}
 
 	outputs := make([]DBSummary, 0, len(dbs))
 	for _, db := range dbs {
+		port := db.NodePort
+		if db.PrivateIP != "" {
+			port = 5432
+		}
 		outputs = append(outputs, DBSummary{
-			ID:        db.ID,
-			ARN:       db.ARN,
-			Name:      db.Name,
-			Port:      db.NodePort,
-			VpcID:     db.VPCID,
-			PrivateIP: db.PrivateIP,
-			Status:    db.Status,
-			CreatedAt: db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			ID:         db.ID,
+			ARN:        db.ARN,
+			Name:       db.Name,
+			Port:       port,
+			PublicPort: db.PublicPort,
+			VpcID:      db.VPCID,
+			PrivateIP:  db.PrivateIP,
+			Status:     db.Status,
+			CreatedAt:  db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		})
 	}
 

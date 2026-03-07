@@ -26,6 +26,7 @@ type Database struct {
 	PhysicalDBName string
 	NodeHost       string
 	NodePort       int
+	PublicPort     int // the allocated public port for external NAT access
 	Status         DBStatus
 	PrivateIP      string // the container's private IP on the VPC
 	VPCID          string // which VPC this database belongs to

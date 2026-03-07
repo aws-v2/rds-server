@@ -21,21 +21,15 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 		db.ID = uuid.New().String()
 	}
 
-	// 1. Gap-Finder for Port Allocation & Insert Database
+	// 1. Insert Database (port is always 5432 — containers use VPC bridge networking)
 	var idempotencyVal interface{}
 	if db.IdempotencyKey != nil {
 		idempotencyVal = *db.IdempotencyKey
 	}
 
 	queryDb := `
-		WITH available_port AS (
-			SELECT generate_series(10000, 20000) AS port
-			EXCEPT
-			SELECT node_port FROM databases WHERE node_host = $1
-			ORDER BY port LIMIT 1
-		)
-		INSERT INTO databases (id, account_id, arn, name, physical_db_name, node_host, node_port, private_ip, vpc_id, status, idempotency_key, created_at, updated_at)
-		VALUES ($2, $3, $8, $4, $5, $1, (SELECT port FROM available_port), $9, $10, $6, $7, NOW(), NOW())
+		INSERT INTO databases (id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, private_ip, vpc_id, status, idempotency_key, created_at, updated_at)
+		VALUES ($2, $3, $8, $4, $5, $1, 5432, $11, $9, $10, $6, $7, NOW(), NOW())
 		RETURNING node_port, created_at, updated_at
 	`
 
@@ -50,10 +44,11 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 		db.ARN,            // $8
 		db.PrivateIP,      // $9
 		db.VPCID,          // $10
+		db.PublicPort,     // $11
 	).Scan(&db.NodePort, &db.CreatedAt, &db.UpdatedAt)
 
 	if err != nil {
-		return fmt.Errorf("failed to insert database with gap-finder port: %w", err)
+		return fmt.Errorf("failed to insert database: %w", err)
 	}
 
 	// 2. Insert Credential
@@ -111,14 +106,14 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 
 func (r *PostgresRepository) GetDatabase(ctx context.Context, id string) (*domain.Database, error) {
 	query := `
-		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, status, idempotency_key, created_at, updated_at, deleted_at
+		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, status, idempotency_key, private_ip, vpc_id, created_at, updated_at, deleted_at
 		FROM databases WHERE id = $1 AND deleted_at IS NULL
 	`
 	db := &domain.Database{}
 	var idempotencyKey *string
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort,
-		&db.Status, &idempotencyKey, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+		&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
+		&db.Status, &idempotencyKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -132,14 +127,14 @@ func (r *PostgresRepository) GetDatabase(ctx context.Context, id string) (*domai
 
 func (r *PostgresRepository) GetDatabaseByIdempotencyKey(ctx context.Context, accountID, idempotencyKey string) (*domain.Database, error) {
 	query := `
-		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, status, idempotency_key, created_at, updated_at, deleted_at
+		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, status, idempotency_key, private_ip, vpc_id, created_at, updated_at, deleted_at
 		FROM databases WHERE account_id = $1 AND idempotency_key = $2 AND deleted_at IS NULL
 	`
 	db := &domain.Database{}
 	var idKey *string
 	err := r.db.QueryRowContext(ctx, query, accountID, idempotencyKey).Scan(
-		&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort,
-		&db.Status, &idKey, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+		&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
+		&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -153,7 +148,7 @@ func (r *PostgresRepository) GetDatabaseByIdempotencyKey(ctx context.Context, ac
 
 func (r *PostgresRepository) ListDatabases(ctx context.Context, accountID string) ([]*domain.Database, error) {
 	query := `
-		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, status, idempotency_key, created_at, updated_at, deleted_at
+		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, status, idempotency_key, private_ip, vpc_id, created_at, updated_at, deleted_at
 		FROM databases 
 		WHERE account_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -169,8 +164,8 @@ func (r *PostgresRepository) ListDatabases(ctx context.Context, accountID string
 		db := &domain.Database{}
 		var idKey *string
 		if err := rows.Scan(
-			&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort,
-			&db.Status, &idKey, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+			&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
+			&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan database: %w", err)
 		}

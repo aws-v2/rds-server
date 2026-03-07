@@ -184,7 +184,7 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 	containerConfig := domain.ContainerConfig{
 		Name:         fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
 		Image:        image,
-		Port:         dbEntity.NodePort,
+		Port:         5432,
 		User:         roleName,
 		Password:     password,
 		OwnerID:      req.AccountID,
@@ -217,13 +217,13 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 		fmt.Printf("WARN: failed to mark restored DB %s as AVAILABLE: %v\n", dbEntity.ID, err)
 	}
 
-	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", roleName, password, nodeHost, dbEntity.NodePort, physicalDBName)
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", roleName, password, nodeHost, physicalDBName)
 	return &CreateDatabaseResponse{
 		DatabaseID:       dbEntity.ID,
 		ARN:              arn,
 		Name:             restoredName,
 		NodeHost:         nodeHost,
-		NodePort:         dbEntity.NodePort,
+		NodePort:         5432,
 		RoleName:         roleName,
 		Password:         password,
 		PhysicalDBName:   physicalDBName,
