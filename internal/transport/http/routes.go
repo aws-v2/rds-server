@@ -31,6 +31,7 @@ func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 	{
 		databases.POST("", handler.CreateDatabase)
 		databases.GET("", handler.ListDatabases)
+		databases.POST("/network/reconcile", handler.ReconcileNetwork)
 		databases.GET("/:id", handler.GetDatabase)
 		databases.DELETE("/:id", handler.DeleteDatabase)
 		databases.POST("/:id/rotate-credentials", handler.RotateCredentials)
@@ -42,6 +43,7 @@ func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 
 		// 2. Compute Modification
 		databases.PATCH("/:id", handler.ModifyDatabase)
+		databases.PUT("/:id/vpc", handler.AssignVPC)
 
 		// 3. Backup & Restore
 		databases.POST("/:id/snapshots", handler.CreateSnapshot)

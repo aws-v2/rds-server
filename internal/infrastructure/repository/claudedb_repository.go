@@ -204,6 +204,19 @@ func (r *PostgresRepository) UpdateDatabasePublicPort(ctx context.Context, id st
 	return nil
 }
 
+func (r *PostgresRepository) UpdateDatabaseNetwork(ctx context.Context, id, vpcID, privateIP, nodeHost string) error {
+	query := `UPDATE databases SET vpc_id = $1, private_ip = $2, node_host = $3, updated_at = NOW() WHERE id = $4`
+	res, err := r.db.ExecContext(ctx, query, vpcID, privateIP, nodeHost, id)
+	if err != nil {
+		return fmt.Errorf("failed to update database network: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PostgresRepository) DeleteDatabase(ctx context.Context, id string) error {
 	query := `UPDATE databases SET status = 'DELETED', deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	res, err := r.db.ExecContext(ctx, query, id)

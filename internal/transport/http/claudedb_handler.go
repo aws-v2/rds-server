@@ -140,6 +140,43 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 	respond(c, http.StatusCreated, "Database provisioned successfully", resp)
 }
 
+type AssignVPCPayload struct {
+	VPCID string `json:"vpc_id" binding:"required"`
+}
+
+// ReconcileNetwork triggers a global reconciliation of the network service
+func (h *ClaudeDBHandler) ReconcileNetwork(c *gin.Context) {
+	if err := h.dbService.ReconcileVPCs(c.Request.Context()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Network reconciliation triggered successfully"})
+}
+
+func (h *ClaudeDBHandler) AssignVPC(c *gin.Context) {
+	var payload AssignVPCPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		respond(c, http.StatusBadRequest, err.Error(), nil)
+		return
+	}
+
+	userID, err := extractAccountID(c)
+	if err != nil {
+		respond(c, http.StatusUnauthorized, err.Error(), nil)
+		return
+	}
+
+	databaseID := c.Param("id")
+
+	if err := h.dbService.AssignVPC(c.Request.Context(), userID, databaseID, payload.VPCID); err != nil {
+		respond(c, http.StatusInternalServerError, err.Error(), nil)
+		return
+	}
+
+	respond(c, http.StatusOK, "Database VPC assignment updated successfully", nil)
+}
+
 type CreateVPCPayload struct {
 	Name string `json:"name" binding:"required"`
 }
@@ -329,8 +366,9 @@ func (h *ClaudeDBHandler) RebootDatabase(c *gin.Context) {
 }
 
 type ModifyDatabasePayload struct {
-	InstanceClass    string `json:"instanceClass" binding:"required"`
+	InstanceClass    string `json:"instanceClass"`
 	AllocatedStorage int    `json:"allocatedStorage,omitempty"`
+	VpcID            string `json:"vpcId,omitempty"`
 }
 
 func (h *ClaudeDBHandler) ModifyDatabase(c *gin.Context) {
@@ -353,16 +391,14 @@ func (h *ClaudeDBHandler) ModifyDatabase(c *gin.Context) {
 		return
 	}
 
-	if err := h.dbService.RebootDatabase(c.Request.Context(), id, accountID); err != nil {
+	if err := h.dbService.ModifyDatabase(c.Request.Context(), id, accountID, payload.VpcID); err != nil {
 		respond(c, http.StatusInternalServerError, fmt.Sprintf("Failed to modify database: %v", err), nil)
 		return
 	}
 
 	respond(c, http.StatusOK, "Database modification initiated successfully", gin.H{
-		"id":            db.ID,
-		"instanceClass": payload.InstanceClass,
-		"storage":       payload.AllocatedStorage,
-		"status":        "MODIFYING",
+		"id":     db.ID,
+		"status": "UPDATING",
 	})
 }
 

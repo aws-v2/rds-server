@@ -20,6 +20,7 @@ type Publisher interface {
 	UnexposeDatabase(resourceID string) error
 	ListVPCs(tenantID string) ([]domain.VPC, error)
 	CreateVPC(tenantID, vpcName, requestedBy string) error
+	ReconcileVPCs() error
 }
 
 // NATSPublisher implements the Publisher interface using NATS Request-Response pattern.
@@ -106,6 +107,17 @@ type listVPCsResponse struct {
 	TenantID      string       `json:"tenant_id"`
 	VPCs          []domain.VPC `json:"vpcs"`
 	Error         string       `json:"error,omitempty"`
+}
+
+type reconcileVPCsRequest struct {
+	CorrelationID string `json:"correlation_id"`
+}
+
+type reconcileVPCsResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	Success       bool   `json:"success"`
+	Message       string `json:"message,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // NewNATSPublisher connects to NATS and returns a NATSPublisher instance.
@@ -353,6 +365,37 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 		return fmt.Errorf("failed to publish create VPC event: %w", err)
 	}
 
+	return nil
+}
+
+// ReconcileVPCs triggers a global VPC reconciliation in the Network Service.
+func (p *NATSPublisher) ReconcileVPCs() error {
+	correlationID := uuid.New().String()
+	req := reconcileVPCsRequest{
+		CorrelationID: correlationID,
+	}
+
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal reconcile request: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] Requesting global VPC reconciliation")
+	msg, err := p.nc.Request("dev.network.v1.vpc.reconcile", reqData, 30*time.Second) // Long timeout for reconciliation
+	if err != nil {
+		return fmt.Errorf("NATS request failed: %w", err)
+	}
+
+	var resp reconcileVPCsResponse
+	if err := json.Unmarshal(msg.Data, &resp); err != nil {
+		return fmt.Errorf("failed to unmarshal reconcile response: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("VPC reconciliation failed: %s", resp.Error)
+	}
+
+	log.Printf("[RDS-NATS] VPC reconciliation completed: %s", resp.Message)
 	return nil
 }
 

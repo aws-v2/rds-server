@@ -328,6 +328,93 @@ func (s *ClaudeDBService) CreateVPC(ctx context.Context, accountID, vpcName stri
 	return s.publisher.CreateVPC(accountID, vpcName, accountID)
 }
 
+// ReconcileVPCs triggers a global network reconciliation
+func (s *ClaudeDBService) ReconcileVPCs(ctx context.Context) error {
+	if s.publisher == nil {
+		return fmt.Errorf("network service publisher is not configured")
+	}
+	return s.publisher.ReconcileVPCs()
+}
+
+// AssignVPC changes the VPC assignment of an existing database
+func (s *ClaudeDBService) AssignVPC(ctx context.Context, accountID, databaseID, newVPCID string) error {
+	db, err := s.GetDatabase(ctx, databaseID, accountID)
+	if err != nil {
+		return err
+	}
+
+	if db.VPCID == newVPCID {
+		return fmt.Errorf("database is already assigned to this VPC")
+	}
+
+	if s.publisher == nil {
+		return fmt.Errorf("network service publisher is not configured")
+	}
+
+	cred, err := s.repo.GetActiveCredential(ctx, databaseID)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve active credential: %w", err)
+	}
+
+	// 1. Release old network IP
+	if err := s.publisher.ReleaseInstanceNetwork(accountID, databaseID, db.VPCID); err != nil {
+		log.Printf("Warning: failed to release old network during vpc assignment: %v", err)
+	}
+
+	// 2. Prepare new network IP
+	privateIP, gateway, bridgeName, err := s.publisher.PrepareInstanceNetwork(accountID, databaseID, newVPCID)
+	if err != nil {
+		return fmt.Errorf("failed to prepare new instance network: %w", err)
+	}
+
+	// 3. Recreate docker container on new network
+	containerName := fmt.Sprintf("claudedb-prod-%s", db.ID)
+	
+	// Temporarily ignore stop/remove errors in case container is already gone.
+	_ = s.dockerClient.StopContainer(ctx, containerName)
+	_ = s.dockerClient.RemoveContainer(ctx, containerName)
+
+	containerConfig := domain.ContainerConfig{
+		Name:         containerName,
+		Image:        "docker.io/library/postgres:15-alpine",
+		Port:         5432,
+		User:         cred.RoleName,
+		Password:     cred.EncryptedPassword,
+		OwnerID:      accountID,
+		VolumeSource: fmt.Sprintf("/tmp/claudedb/volumes/%s/data", db.ID),
+		VolumeDest:   "/var/lib/postgresql/data",
+		Environment: map[string]string{
+			"POSTGRES_DB": db.PhysicalDBName,
+		},
+		Labels: map[string]string{
+			"service": "claudedb-tenant",
+		},
+		PrivateIP:  privateIP,
+		BridgeName: bridgeName,
+		Gateway:    gateway,
+	}
+
+	containerID, err := s.dockerClient.CreateContainer(ctx, containerConfig)
+	if err != nil {
+		return fmt.Errorf("failed to recreate docker container on new VPC: %w", err)
+	}
+
+	if err := s.dockerClient.StartContainer(ctx, containerID); err != nil {
+		_ = s.dockerClient.RemoveContainer(ctx, containerID) // cleanup
+		return fmt.Errorf("failed to start database container on new VPC: %w", err)
+	}
+
+	// 4. Update Database record with new network metadata
+	if err := s.repo.UpdateDatabaseNetwork(ctx, databaseID, newVPCID, privateIP, privateIP); err != nil {
+		return fmt.Errorf("failed to update database network details in DB: %w", err)
+	}
+
+	log.Printf("[VPC-ASSIGN] RDS instance %s migrated to VPC %s (bridge: %s, IP: %s)",
+			databaseID, newVPCID, bridgeName, privateIP)
+
+	return nil
+}
+
 // GetDatabase get database details
 func (s *ClaudeDBService) GetDatabase(ctx context.Context, id, accountID string) (*domain.Database, error) {
 	db, err := s.repo.GetDatabase(ctx, id)
@@ -487,6 +574,109 @@ func (s *ClaudeDBService) StopDatabase(ctx context.Context, id, accountID string
 	}
 
 	return s.repo.UpdateDatabaseStatus(ctx, id, domain.DBStatusStopped)
+}
+
+// ModifyDatabase handles changes to database configuration, including VPC hopping
+func (s *ClaudeDBService) ModifyDatabase(ctx context.Context, id, accountID, newVpcID string) error {
+	db, err := s.GetDatabase(ctx, id, accountID)
+	if err != nil {
+		return err
+	}
+
+	// 1. Check if VPC hopping is requested
+	if newVpcID != "" && newVpcID != db.VPCID {
+		log.Printf("[RDS] Hopping database %s from VPC %s to %s", id, db.VPCID, newVpcID)
+
+		// a. Stop current container
+		containerName := fmt.Sprintf("claudedb-prod-%s", id)
+		_ = s.dockerClient.StopContainer(ctx, containerName)
+
+		// b. Unexpose if it has a public port
+		wasExposed := db.PublicPort > 0
+		if wasExposed && s.publisher != nil {
+			_ = s.publisher.UnexposeDatabase(id)
+		}
+
+		// c. Release old network
+		if s.publisher != nil && db.VPCID != "" {
+			_ = s.publisher.ReleaseInstanceNetwork(accountID, id, db.VPCID)
+		}
+
+		// d. Prepare new network
+		var privateIP, gateway, bridgeName string
+		if s.publisher != nil {
+			pIP, gw, br, err := s.publisher.PrepareInstanceNetwork(accountID, id, newVpcID)
+			if err != nil {
+				return fmt.Errorf("failed to prepare new network for hop: %w", err)
+			}
+			privateIP = pIP
+			gateway = gw
+			bridgeName = br
+		}
+
+		// e. Update metadata in DB
+		nodeHost := privateIP
+		if nodeHost == "" {
+			nodeHost = "localhost"
+		}
+		if err := s.repo.UpdateDatabaseNetwork(ctx, id, newVpcID, privateIP, nodeHost); err != nil {
+			return fmt.Errorf("failed to update database network metadata: %w", err)
+		}
+
+		// f. Remove old container and recreate with new network config
+		_ = s.dockerClient.RemoveContainer(ctx, containerName)
+
+		cred, err := s.repo.GetActiveCredential(ctx, id)
+		if err != nil {
+			return fmt.Errorf("failed to get credentials for recreation: %w", err)
+		}
+
+		image := "docker.io/library/postgres:15-alpine"
+		containerConfig := domain.ContainerConfig{
+			Name:         containerName,
+			Image:        image,
+			Port:         5432,
+			User:         cred.RoleName,
+			Password:     cred.EncryptedPassword,
+			OwnerID:      accountID,
+			VolumeSource: fmt.Sprintf("/tmp/claudedb/volumes/%s/data", id),
+			VolumeDest:   "/var/lib/postgresql/data",
+			Environment: map[string]string{
+				"POSTGRES_DB": db.PhysicalDBName,
+			},
+			Labels: map[string]string{
+				"service": "claudedb-tenant",
+			},
+			PrivateIP:  privateIP,
+			BridgeName: bridgeName,
+			Gateway:    gateway,
+		}
+
+		_, err = s.dockerClient.CreateContainer(ctx, containerConfig)
+		if err != nil {
+			return fmt.Errorf("failed to recreate container on new network: %w", err)
+		}
+
+		if err := s.dockerClient.StartContainer(ctx, containerName); err != nil {
+			return fmt.Errorf("failed to start container on new network: %w", err)
+		}
+
+		// g. Re-expose if necessary
+		if wasExposed && s.publisher != nil && s.publicHostIP != "" {
+			log.Printf("[RDS] Re-exposing database %s after hop", id)
+			publicPort, err := s.publisher.ExposeDatabase(accountID, id, privateIP, s.publicHostIP, 5432)
+			if err != nil {
+				log.Printf("[RDS] WARNING: Failed to re-expose database %s after hop: %v", id, err)
+			} else {
+				_ = s.repo.UpdateDatabasePublicPort(ctx, id, publicPort)
+			}
+		}
+
+		return s.repo.UpdateDatabaseStatus(ctx, id, domain.DBStatusAvailable)
+	}
+
+	// 2. If no VPC change, just reboot for other modifications (instance class etc)
+	return s.RebootDatabase(ctx, id, accountID)
 }
 
 // RebootDatabase restarts the database container
