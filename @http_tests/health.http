@@ -1,0 +1,12 @@
+@baseUrl = http://localhost:8082/api/v1/rds
+@apiKey = your_access_key_id:your_secret_access_key
+
+### 
+# 1. Health Ping
+GET {{baseUrl}}/health/ping
+
+
+### 
+# 2. Complete Health Status
+GET {{baseUrl}}/health/status
+

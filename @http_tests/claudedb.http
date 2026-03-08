@@ -1,0 +1,239 @@
+@baseUrl = http://localhost:8082/api/v1/rds
+@apiKey = your_access_key_id:your_secret_access_key
+
+@jwt = eyJhbGciOiJIUzUxMiJ9.eyJ1c2VySWQiOiJmN2I4Y2FkZC05MmNiLTQ4MzAtYTU2NS1hMWM5MDM1OTdmYzYiLCJzdWIiOiJlbXFhcmFuaTM0QGdtYWlsLmNvbSIsImlhdCI6MTc3MjMzOTYwMSwiZXhwIjoxNzcyNDI2MDAxfQ.A9Wysx6lOzZSXxoh7jnw65w1Oh8PrZKkOi1XiibjM4xoMTxgixSs-JrODEvstCYj5BkJUh82zKJdgW7a5XbnGg
+
+###
+# 1. Create a ClaudeDB Database
+# @name createDB
+POST {{baseUrl}}/databases
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+Idempotency-Key: 123e4567-e89b-12d3-a456-42661417400F
+
+{
+    "name": "production-api-db1gww",
+    "user": "my_custom_user",
+    "password": "my_secure_password"
+}
+
+
+###
+# Extract the generated database ID from the previous request
+@dbId = {{createDB.response.body.DatabaseID}}
+
+###
+# 2. List all Databases
+GET {{baseUrl}}/databases
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 3. Get Database Metadata by ID
+GET {{baseUrl}}/databases/66f2f385-85a3-46f8-abcf-afbcc2a0a3ec
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 4. Rotate Database Credentials
+POST {{baseUrl}}/databases/{{dbId}}/rotate-credentials
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+###
+
+POST {{baseUrl}}/databases/{{dbId}}/start
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 7. Stop Database
+POST {{baseUrl}}/databases/{{dbId}}/stop
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 8. Reboot Database
+POST {{baseUrl}}/databases/{{dbId}}/reboot
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 9. Modify Database
+PATCH {{baseUrl}}/databases/{{dbId}}
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+    "instanceClass": "db.t3.medium",
+    "allocatedStorage": 20
+}
+
+
+###
+# 10. Create Snapshot
+# @name createSnapshot
+POST {{baseUrl}}/databases/{{dbId}}/snapshots
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+    "name": "my-manual-snapshot",
+    "databaseId": "{{dbId}}"
+}
+
+###
+# Extract generated Snapshot ID
+@snapshotId = {{createSnapshot.response.body.ID}}
+
+
+###
+# 11. List Snapshots
+GET {{baseUrl}}/databases/{{dbId}}/snapshots
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 12. Restore Database from Snapshot
+POST {{baseUrl}}/databases/restore
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+    "snapshotId": "{{snapshotId}}"
+}
+
+
+###
+# 13. Delete Snapshot
+DELETE {{baseUrl}}/snapshots/{{snapshotId}}
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###
+# 14. Get Metrics
+GET {{baseUrl}}/databases/{{dbId}}/metrics
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 15. Get Logs
+GET {{baseUrl}}/databases/{{dbId}}/logs
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 16. Get Parameters
+GET {{baseUrl}}/databases/{{dbId}}/parameters
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 17. Modify Parameters
+PATCH {{baseUrl}}/databases/{{dbId}}/parameters
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+    "parameters": {
+        "max_connections": 200,
+        "shared_buffers": "256MB"
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###
+# 18. Create Volume
+# @name createVolume
+POST {{baseUrl}}/volumes
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+{
+    "name": "my-data-volume",
+    "sizeGb": 10
+}
+
+###
+# Extract generated Volume ID
+@volumeId = {{createVolume.response.body.ID}}
+
+
+###
+# 19. List Volumes
+GET {{baseUrl}}/volumes
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 20. Get Volume
+GET {{baseUrl}}/volumes/{{volumeId}}
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 21. Delete Volume
+DELETE {{baseUrl}}/volumes/{{volumeId}}
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
+
+
+###
+# 22. Delete Database
+DELETE {{baseUrl}}/databases/{{dbId}}
+Content-Type: application/json
+Authorization: Bearer {{jwt}}
