@@ -1,4 +1,4 @@
-@baseUrl = http://localhost:8082/api/v1/rds
+@baseUrl = http://localhost:8087/api/v1/rds
 @apiKey = your_access_key_id:your_secret_access_key
 
 ### 

@@ -8,5 +8,5 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o rds-server main.go
 FROM alpine:latest
 WORKDIR /root/
 COPY --from=builder /app/rds-server .
-EXPOSE 8081
+EXPOSE 8087
 CMD ["./rds-server"]

@@ -43,7 +43,7 @@ func getCredentials() (string, string, error) {
 func getBaseURL() string {
 	baseURL := os.Getenv("RDS_URL")
 	if baseURL == "" {
-		baseURL = "http://localhost:8082"
+		baseURL = "http://localhost:8087"
 	}
 	return baseURL
 }

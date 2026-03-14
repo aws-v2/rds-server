@@ -1,4 +1,4 @@
-@baseUrl = http://localhost:8082/api/v1/rds
+@baseUrl = http://localhost:8087/api/v1/rds
 @apiKey = your_access_key_id:your_secret_access_key
 
 @jwt = eyJhbGciOiJIUzUxMiJ9.eyJ1c2VySWQiOiJmN2I4Y2FkZC05MmNiLTQ4MzAtYTU2NS1hMWM5MDM1OTdmYzYiLCJzdWIiOiJlbXFhcmFuaTM0QGdtYWlsLmNvbSIsImlhdCI6MTc3MjMzOTYwMSwiZXhwIjoxNzcyNDI2MDAxfQ.A9Wysx6lOzZSXxoh7jnw65w1Oh8PrZKkOi1XiibjM4xoMTxgixSs-JrODEvstCYj5BkJUh82zKJdgW7a5XbnGg
