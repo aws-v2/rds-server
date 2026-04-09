@@ -1,0 +1,21 @@
+name: Dev CI/CD
+
+on:
+  push:
+    branches: [ "dev", "develop" ]
+  pull_request:
+    branches: [ "dev", "develop", "main", "staging" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+
+    - name: Run Tests
+      run: go test ./...

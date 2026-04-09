@@ -16,7 +16,7 @@ jobs:
       - name: Run tests
         run: |
           # Run your usual tests
-          npm ci && npm test
+          go test ./...
 
       - name: Get diff
         id: diff
