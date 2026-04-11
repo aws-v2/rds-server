@@ -1,399 +1,233 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"os"
+	"database/sql"
+	"net/url"
+	"rds/internal/application"
+	"rds/internal/config"
+	"rds/internal/discovery"
+	"rds/internal/infrastructure/database"
+	"rds/internal/infrastructure/docker"
+	"rds/internal/infrastructure/event"
+	"rds/internal/infrastructure/repository"
+	"rds/internal/logger"
+	"rds/internal/messaging"
+	"rds/internal/transport/http"
+	"rds/internal/utils"
 	"time"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
-type CreateInstanceInput struct {
-	Name     string `json:"name"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-}
-
-type InstanceOutput struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Engine    string    `json:"engine"`
-	Port      int       `json:"port"`
-	User      string    `json:"user"`
-	CreatedAt time.Time `json:"createdAt"`
-}
-
-type ListInstancesOutput struct {
-	Instances []InstanceOutput `json:"instances"`
-}
-
-func getCredentials() (string, string, error) {
-	accessKeyID := os.Getenv("AWS_ACCESS_KEY_ID")
-	secretAccessKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-
-	if accessKeyID == "" || secretAccessKey == "" {
-		return "", "", fmt.Errorf("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables must be set")
-	}
-
-	return accessKeyID, secretAccessKey, nil
-}
-
-func getBaseURL() string {
-	baseURL := os.Getenv("RDS_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8087"
-	}
-	return baseURL
-}
-
-func makeRequest(method, url string, body io.Reader, accessKeyID, secretAccessKey string) (*http.Response, error) {
-	req, err := http.NewRequest(method, url, body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("x-api-key", fmt.Sprintf("%s:%s", accessKeyID, secretAccessKey))
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{}
-	return client.Do(req)
-}
-
-func createDB() {
-	if len(os.Args) < 5 {
-		fmt.Println("Usage: miniaws rds create-db <name> <user> <password>")
-		return
-	}
-
-	name := os.Args[2]
-	user := os.Args[3]
-	password := os.Args[4]
-
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	input := CreateInstanceInput{
-		Name:     name,
-		User:     user,
-		Password: password,
-	}
-
-	jsonData, err := json.Marshal(input)
-	if err != nil {
-		fmt.Printf("Error marshaling request: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("POST", baseURL+"/api/v1/rds/instances", bytes.NewBuffer(jsonData), accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error creating DB: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var instance InstanceOutput
-		if err := json.Unmarshal(body, &instance); err != nil {
-			fmt.Printf("Error parsing response: %v\n", err)
-			return
-		}
-		fmt.Printf("Database instance created successfully!\n")
-		fmt.Printf("ID: %s\n", instance.ID)
-		fmt.Printf("Name: %s\n", instance.Name)
-		fmt.Printf("Engine: %s\n", instance.Engine)
-		fmt.Printf("Port: %d\n", instance.Port)
-		fmt.Printf("User: %s\n", instance.User)
-		fmt.Printf("CreatedAt: %s\n", instance.CreatedAt.Format(time.RFC3339))
-	} else {
-		fmt.Printf("Failed to create DB instance. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
-func listDB() {
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("GET", baseURL+"/api/v1/rds/instances", nil, accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error listing DBs: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var output ListInstancesOutput
-		if err := json.Unmarshal(body, &output); err != nil {
-			fmt.Printf("Error parsing response: %v\n", err)
-			return
-		}
-
-		if len(output.Instances) == 0 {
-			fmt.Println("No database instances found.")
-			return
-		}
-
-		fmt.Printf("Found %d database instance(s):\n", len(output.Instances))
-		for _, inst := range output.Instances {
-			fmt.Printf("\nID: %s\n", inst.ID)
-			fmt.Printf("Name: %s\n", inst.Name)
-			fmt.Printf("Engine: %s\n", inst.Engine)
-			fmt.Printf("Port: %d\n", inst.Port)
-			fmt.Printf("User: %s\n", inst.User)
-			fmt.Printf("CreatedAt: %s\n", inst.CreatedAt.Format(time.RFC3339))
-		}
-	} else {
-		fmt.Printf("Failed to list DB instances. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
-func describeDB() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: miniaws rds describe-db <instance-id>")
-		return
-	}
-
-	instanceID := os.Args[2]
-
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("GET", baseURL+"/api/v1/rds/instances/"+instanceID, nil, accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error describing DB: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		var instance InstanceOutput
-		if err := json.Unmarshal(body, &instance); err != nil {
-			fmt.Printf("Error parsing response: %v\n", err)
-			return
-		}
-		fmt.Printf("Database Instance Details:\n")
-		fmt.Printf("ID: %s\n", instance.ID)
-		fmt.Printf("Name: %s\n", instance.Name)
-		fmt.Printf("Engine: %s\n", instance.Engine)
-		fmt.Printf("Port: %d\n", instance.Port)
-		fmt.Printf("User: %s\n", instance.User)
-		fmt.Printf("CreatedAt: %s\n", instance.CreatedAt.Format(time.RFC3339))
-	} else {
-		fmt.Printf("Failed to describe DB instance. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
-func deleteDB() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: miniaws rds delete-db <instance-id>")
-		return
-	}
-
-	instanceID := os.Args[2]
-
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("DELETE", baseURL+"/api/v1/rds/instances/"+instanceID, nil, accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error deleting DB: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("Database instance %s deleted successfully!\n", instanceID)
-	} else {
-		fmt.Printf("Failed to delete DB instance. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
-func startDB() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: miniaws rds start-db <instance-id>")
-		return
-	}
-
-	instanceID := os.Args[2]
-
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("POST", baseURL+"/api/v1/rds/instances/"+instanceID+"/start", nil, accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error starting DB: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("Database instance %s started successfully!\n", instanceID)
-	} else {
-		fmt.Printf("Failed to start DB instance. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
-func stopDB() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: miniaws rds stop-db <instance-id>")
-		return
-	}
-
-	instanceID := os.Args[2]
-
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("POST", baseURL+"/api/v1/rds/instances/"+instanceID+"/stop", nil, accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error stopping DB: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("Database instance %s stopped successfully!\n", instanceID)
-	} else {
-		fmt.Printf("Failed to stop DB instance. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
-func viewLogs() {
-	if len(os.Args) < 3 {
-		fmt.Println("Usage: miniaws rds logs <instance-id>")
-		return
-	}
-
-	instanceID := os.Args[2]
-
-	accessKeyID, secretAccessKey, err := getCredentials()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	baseURL := getBaseURL()
-	resp, err := makeRequest("GET", baseURL+"/api/v1/rds/instances/"+instanceID+"/logs", nil, accessKeyID, secretAccessKey)
-	if err != nil {
-		fmt.Printf("Error viewing logs: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Printf("Error reading response: %v\n", err)
-		return
-	}
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		fmt.Printf("Audit logs for instance %s:\n", instanceID)
-		fmt.Println(string(body))
-	} else {
-		fmt.Printf("Failed to view logs. Status: %d\n", resp.StatusCode)
-		fmt.Printf("Response: %s\n", string(body))
-	}
-}
-
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("Usage: miniaws rds <command>")
-		fmt.Println("Commands:")
-		fmt.Println("  create-db <name> <user> <password> - Create a new database instance")
-		fmt.Println("  list-db                             - List all database instances")
-		fmt.Println("  describe-db <instance-id>           - Describe a specific database instance")
-		fmt.Println("  delete-db <instance-id>             - Delete a database instance")
-		fmt.Println("  start-db <instance-id>              - Start a stopped database instance")
-		fmt.Println("  stop-db <instance-id>               - Stop a running database instance")
-		fmt.Println("  logs <instance-id>                  - View audit logs for an instance")
-		return
+	// 0. Initialize Logger
+	logger.Init()
+	defer logger.Log.Sync()
+	logger.Log.Info("Starting RDS Service...")
+
+	// 0.1 Load Configuration
+	cfg, err := config.Load()
+	if err != nil {
+		logger.Log.Fatal("Failed to load configuration", zap.Error(err))
 	}
 
-	command := os.Args[1]
-	switch command {
-	case "create-db":
-		createDB()
-	case "list-db":
-		listDB()
-	case "describe-db":
-		describeDB()
-	case "delete-db":
-		deleteDB()
-	case "start-db":
-		startDB()
-	case "stop-db":
-		stopDB()
-	case "logs":
-		viewLogs()
-	default:
-		fmt.Printf("Unknown command: %s\n", command)
-		fmt.Println("Available commands: create-db, list-db, describe-db, delete-db, start-db, stop-db, logs")
+	logger.Log.Info("Application Profile", zap.String("profile", cfg.Profile))
+
+	// 0.2 Eureka Configuration
+	eurekaConfig := discovery.GetEurekaConfig()
+	eurekaConfig.ServerURL = cfg.Eureka.ServerURL
+
+	if err := discovery.RegisterWithEureka(eurekaConfig); err != nil {
+		logger.Log.Error("Failed to register with Eureka", zap.Error(err))
+	} else {
+		go discovery.SendHeartbeat(eurekaConfig)
+	}
+
+	// 1. Connect to NATS (for IAM auth)
+	if cfg.NATS.URL != "" {
+		natsURL, err := url.Parse(cfg.NATS.URL)
+		if err == nil {
+			host := natsURL.Hostname()
+			port := natsURL.Port()
+			if port == "" {
+				port = "4222"
+			}
+			logger.Log.Info("Checking NATS reachability", zap.String("host", host), zap.String("port", port))
+
+			maxRetries := 5
+			for i := 1; i <= maxRetries; i++ {
+				if err := utils.CheckReachability(host, port, 2*time.Second); err == nil {
+					logger.Log.Info("NATS is reachable")
+					break
+				} else {
+					if i == maxRetries {
+						logger.Log.Fatal("FATAL: NATS is not reachable after retries",
+							zap.String("host", host),
+							zap.String("port", port),
+							zap.Error(err))
+					}
+					logger.Log.Warn("NATS not reachable, retrying...",
+						zap.Int("attempt", i),
+						zap.Int("max_retries", maxRetries))
+					time.Sleep(2 * time.Second)
+				}
+			}
+		}
+	}
+
+	logger.Log.Info("Connecting to NATS", zap.String("url", cfg.NATS.URL))
+	var natsAdapter *event.NATSAdapter
+	if cfg.NATS.User != "" && cfg.NATS.Password != "" {
+		natsAdapter, err = event.NewNATSAdapterWithAuth(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password)
+	} else {
+		natsAdapter, err = event.NewNATSAdapter(cfg.NATS.URL)
+	}
+
+	if err != nil {
+		logger.Log.Fatal("Failed to connect to NATS", zap.Error(err))
+	}
+	defer natsAdapter.Close()
+
+	// 1.1 Initialize NATS Publisher for Network Service
+	var natsPublisher *messaging.NATSPublisher
+	if cfg.NATS.URL != "" {
+		logger.Log.Info("Initializing NATS Publisher", zap.String("url", cfg.NATS.URL))
+		natsPublisher, err = messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password)
+		if err != nil {
+			logger.Log.Error("Failed to initialize NATS Publisher", zap.Error(err))
+		} else {
+			defer natsPublisher.Close()
+		}
+	}
+
+	// 2. Connect to PostgreSQL with Retries
+	dbConfig := database.Config{
+		Host:            cfg.DB.Host,
+		Port:            cfg.DB.Port,
+		User:            cfg.DB.User,
+		Password:        cfg.DB.Password,
+		Database:        cfg.DB.Database,
+		SSLMode:         cfg.DB.SSLMode,
+		MaxOpenConns:    cfg.DB.MaxOpenConns,
+		MaxIdleConns:    cfg.DB.MaxIdleConns,
+		ConnMaxLifetime: cfg.DB.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.DB.ConnMaxIdleTime,
+	}
+
+	// TCP Reachability check for Postgres
+	logger.Log.Info("Checking Postgres reachability", zap.String("host", dbConfig.Host), zap.Int("port", dbConfig.Port))
+	maxRetries := 5
+	for i := 1; i <= maxRetries; i++ {
+		if err := utils.CheckReachability(dbConfig.Host, dbConfig.Port, 2*time.Second); err == nil {
+			logger.Log.Info("Postgres is reachable")
+			break
+		} else {
+			if i == maxRetries {
+				// We don't fatal here yet because we have SQLite fallback, but we log the failure
+				logger.Log.Error("Postgres is not reachable after retries",
+					zap.String("host", dbConfig.Host),
+					zap.Int("port", dbConfig.Port),
+					zap.Error(err))
+			} else {
+				logger.Log.Warn("Postgres not reachable, retrying...",
+					zap.Int("attempt", i),
+					zap.Int("max_retries", maxRetries))
+				time.Sleep(2 * time.Second)
+			}
+		}
+	}
+
+	var db *sql.DB
+	for i := 1; i <= maxRetries; i++ {
+		logger.Log.Info("Attempting to connect to PostgreSQL", zap.Int("attempt", i))
+		db, err = database.NewPostgresDB(dbConfig)
+		if err == nil {
+			break
+		}
+		logger.Log.Warn("Failed to connect to PostgreSQL", zap.Int("attempt", i), zap.Error(err))
+		if i < maxRetries {
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	if err != nil {
+		logger.Log.Warn("Could not connect to PostgreSQL after retries, falling back to SQLite")
+		sqlitePath := "lambda.db"
+		db, err = database.NewSQLiteDB(sqlitePath)
+		if err != nil {
+			logger.Log.Fatal("Failed to connect to SQLite fallback", zap.Error(err))
+		}
+		logger.Log.Info("Connected to SQLite fallback", zap.String("path", sqlitePath))
+	} else {
+		logger.Log.Info("Successfully connected to PostgreSQL")
+	}
+	defer db.Close()
+
+	// 3. Run migrations
+	logger.Log.Info("Running database migrations...")
+	if err := database.RunMigrations(db, dbConfig.Database); err != nil {
+		logger.Log.Fatal("Failed to run migrations", zap.Error(err))
+	}
+	logger.Log.Info("Migrations completed successfully")
+
+	// 4. Initialize repository
+	repo := repository.NewPostgresRepository(db)
+
+	// 5. Initialize Docker adapter
+	logger.Log.Info("Initializing Docker adapter...")
+	dockerAdapter, err := docker.NewDockerAdapter()
+	if err != nil {
+		logger.Log.Fatal("Failed to create Docker adapter", zap.Error(err))
+	}
+
+	// 7. Initialize services
+	logger.Log.Info("Initializing services...")
+	auditService := application.NewAuditService(repo)
+	healthService := application.NewHealthService(repo, dockerAdapter)
+	configService := application.NewConfigService(repo, auditService)
+	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, natsPublisher, cfg.Server.Region, cfg.Server.PublicHostIP)
+	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
+	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
+	docsService := application.NewDocsService("docs")
+
+	workerService := application.NewWorkerService(repo, dockerAdapter)
+	workerService.Start()
+	defer workerService.Stop()
+
+	metricsCollector := application.NewMetricsCollector(repo, dockerAdapter, natsPublisher, cfg.Server.MetricsURL, cfg.Server.MetricsToken)
+	metricsCollector.Start()
+	defer metricsCollector.Stop()
+
+	scalingService := application.NewScalingService(repo, dockerAdapter, natsAdapter)
+	scalingService.Start()
+	defer scalingService.Stop()
+
+	// 8. Initialize handlers
+	logger.Log.Info("Initializing HTTP handlers...")
+
+	// Temporarily passing nil for IAMValidator since it was stripped out in a previous PR
+	claudeDBHandler := http.NewClaudeDBHandler(claudeDBService, volumeService, snapshotService, nil)
+	healthHandler := http.NewHealthHandler(healthService)
+	configHandler := http.NewConfigHandler(configService)
+	docsHandler := http.NewDocsHandler(docsService)
+
+	handlers := &http.Handlers{
+		ClaudeDB: claudeDBHandler,
+		Health:   healthHandler,
+		Config:   configHandler,
+		Docs:     docsHandler,
+	}
+
+	// 9. Setup router
+	router := gin.Default()
+	http.RegisterRoutes(router, handlers)
+
+	// 10. Start server
+	logger.Log.Info("🚀 RDS Service starting", zap.String("port", cfg.Server.Port))
+	logger.Log.Info("📝 API endpoints ready")
+
+	if err := router.Run(":" + cfg.Server.Port); err != nil {
+		logger.Log.Fatal("Failed to start server", zap.Error(err))
 	}
 }

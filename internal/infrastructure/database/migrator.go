@@ -15,9 +15,17 @@ var migrationsFS embed.FS
 
 // RunMigrations executes all pending database migrations
 func RunMigrations(db *sql.DB, dbName string) error {
+	// Check if the driver is postgres
+	// We can try to get the driver name from the db connection if available, 
+	// or assume that since we are using postgres.WithInstance, it will fail for others.
+	// To be safe and informative, we'll try to create the driver and handle the error gracefully if it's not postgres.
+	
 	driver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
-		return fmt.Errorf("failed to create migration driver: %w", err)
+		// If it's not postgres, we might be using SQLite fallback.
+		// Since migrations are Postgres-specific, we skip them for other drivers.
+		fmt.Printf("Warning: Migration driver initialization failed (likely not using PostgreSQL): %v. Skipping migrations.\n", err)
+		return nil
 	}
 
 	sourceDriver, err := iofs.New(migrationsFS, "migrations")

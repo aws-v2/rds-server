@@ -51,5 +51,14 @@ jobs:
             docker run -d --name rds-server-staging \
               --network aws_backend \
               -p 8087:8087 \
+              -e APP_PROFILE=staging \
               -e RDS_PORT=8087 \
+              -e DB_HOST=postgres-staging \
+              -e DB_PORT=5432 \
+              -e DB_USER=postgres \
+              -e DB_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }} \
+              -e DB_NAME=rds_db \
+              -e NATS_URL=nats://nats-staging:4222 \
+              -e NATS_USER=auth-server \
+              -e NATS_PASSWORD=${{ secrets.STAGING_NATS_PASSWORD }} \
               qarani/rds-server:staging

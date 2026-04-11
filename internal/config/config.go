@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
-	"strconv"
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -61,6 +62,12 @@ type EurekaConfig struct {
 }
 
 func Load() (*Config, error) {
+	profile := getEnv("APP_PROFILE", "dev")
+
+	// Try loading profile-specific env file first, then fallback to .env
+	_ = godotenv.Load(".env-" + profile)
+	_ = godotenv.Load()
+
 	cfg := &Config{
 		DB: DBConfig{
 			Host:            getEnv("DB_HOST", "localhost"),
@@ -80,18 +87,18 @@ func Load() (*Config, error) {
 			Password: getEnv("NATS_PASSWORD", "auth-secret"),
 		},
 		Server: ServerConfig{
-			Port:         getEnv("RDS_PORT", "8087"), // Keeping existing RDS conventions here
+			Port:         getEnv("RDS_PORT", "8087"),
 			ServiceName:  getEnv("SERVICE_NAME", "rds-server"),
 			StoragePath:  getEnv("CODE_STORAGE_PATH", "./storage"),
 			Region:       getEnv("AWS_REGION", "eu-north-1"),
-			PublicHostIP: getEnv("PUBLIC_HOST_IP", "192.168.1.7"),
+			PublicHostIP: getEnv("PUBLIC_HOST_IP", "localhost"),
 			MetricsURL:   getEnv("METRICS_SERVER_URL", "http://localhost:8099/api/v1/metrics-server"),
 			MetricsToken: getEnv("METRICS_AUTH_TOKEN", ""),
 		},
 		Eureka: EurekaConfig{
 			ServerURL: getEnv("EUREKA_SERVER_URL", "http://localhost:8761/eureka"),
 		},
-		Profile: getEnv("APP_PROFILE", "DEV"),
+		Profile: profile,
 	}
 
 	return cfg, nil
@@ -161,7 +168,6 @@ func LoadConfig(url string) error {
 	}
 
 	// Iterate through property sources and set environment variables
-	// Higher priority sources come first in the slice
 	for i := len(configResp.PropertySources) - 1; i >= 0; i-- {
 		ps := configResp.PropertySources[i]
 		for k, v := range ps.Source {
@@ -172,5 +178,3 @@ func LoadConfig(url string) error {
 
 	return nil
 }
-
-// { "id": "7ab55ef2-167a-4ac3-a05a-29e1201c794c", "name": "database-1", "user": "postgres", "status": "AVAILABLE", "engine": "PostgreSQL", "endpoint": "10.1.1.2", "port": 5432, "createdAt": "2026-03-07T09:44:53Z", "region": "eu-north-1", "arn": "arn:serw:rds:eu-north-1:7d2eaa56-3c94-4f3f-853e-b5a67c9e1890:db/7ab55ef2-167a-4ac3-a05a-29e1201c794c", "connectionString": "postgres://postgres:sjkhajsbckjb@10.1.1.2:5432/db_3a6ad75b", "host": "10.1.1.2", "physicalDbName": "db_3a6ad75b", "roleName": "postgres", "password": "sjkhajsbckjb", "publicConnectionString": "postgres://postgres:sjkhajsbckjb@192.168.1.7:5433/db_3a6ad75b" }
