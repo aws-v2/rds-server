@@ -44,21 +44,25 @@ jobs:
           username: ${{ secrets.STAGING_USERNAME }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
-            docker network create aws_backend || true
+            docker network create aws-staging-network || true
             docker pull qarani/rds-server:staging
             docker stop rds-server-staging || true
             docker rm rds-server-staging || true
             docker run -d --name rds-server-staging \
-              --network aws_backend \
-              -p 8087:8087 \
-              -e APP_PROFILE=staging \
-              -e RDS_PORT=8087 \
+              --network aws-staging-network \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -p 8805:8805 \
+              -e APP_PROFILE=STAGING \
+              -e RDS_PORT=8805 \
               -e DB_HOST=postgres-staging \
               -e DB_PORT=5432 \
-              -e DB_USER=postgres \
-              -e DB_PASSWORD=${{ secrets.STAGING_DB_PASSWORD }} \
+              -e DB_USER=root \
+              -e DB_PASSWORD=root \
               -e DB_NAME=rds_db \
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USER=auth-server \
-              -e NATS_PASSWORD=${{ secrets.STAGING_NATS_PASSWORD }} \
+              -e NATS_PASSWORD=auth-secret \
+              -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
+              -e PUBLIC_HOST_IP=192.168.1.7 \
+              -e AWS_REGION=eu-north-1 \
               qarani/rds-server:staging
