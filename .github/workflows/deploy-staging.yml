@@ -53,6 +53,8 @@ jobs:
               -v /var/run/docker.sock:/var/run/docker.sock \
               -p 8805:8805 \
               -e APP_PROFILE=STAGING \
+              -e EUREKA_HOSTNAME=rds-server-staging \
+              -e EUREKA_IP_ADDR=8761 \
               -e RDS_PORT=8805 \
               -e DB_HOST=postgres-staging \
               -e DB_PORT=5432 \
