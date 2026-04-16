@@ -54,7 +54,7 @@ jobs:
               -p 8805:8805 \
               -e APP_PROFILE=STAGING \
               -e EUREKA_HOSTNAME=rds-server-staging \
-              -e EUREKA_IP_ADDR=8761 \
+              -e EUREKA_IP_ADDR=127.0.0.1 \
               -e RDS_PORT=8805 \
               -e DB_HOST=postgres-staging \
               -e DB_PORT=5432 \
@@ -62,7 +62,7 @@ jobs:
               -e DB_PASSWORD=postgres-staging-password \
               -e DB_NAME=rds_db \
               -e NATS_URL=nats://nats-staging:4222 \
-              -e NATS_USER=auth-nats-staging-user \
+              -e NATS_USERNAME=nats-staging-user \
               -e NATS_PASSWORD=nats-staging-password \
               -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
               -e PUBLIC_HOST_IP=192.168.1.7 \
