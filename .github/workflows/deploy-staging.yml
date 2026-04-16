@@ -58,12 +58,12 @@ jobs:
               -e RDS_PORT=8805 \
               -e DB_HOST=postgres-staging \
               -e DB_PORT=5432 \
-              -e DB_USER=root \
-              -e DB_PASSWORD=root \
+              -e DB_USER=postgres-staging-user \
+              -e DB_PASSWORD=postgres-staging-password \
               -e DB_NAME=rds_db \
               -e NATS_URL=nats://nats-staging:4222 \
-              -e NATS_USER=auth-server \
-              -e NATS_PASSWORD=auth-secret \
+              -e NATS_USER=auth-nats-staging-user \
+              -e NATS_PASSWORD=nats-staging-password \
               -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
               -e PUBLIC_HOST_IP=192.168.1.7 \
               -e AWS_REGION=eu-north-1 \
