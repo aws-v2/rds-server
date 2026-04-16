@@ -83,7 +83,7 @@ func Load() (*Config, error) {
 		},
 		NATS: NATSConfig{
 			URL:      getEnv("NATS_URL", "nats://localhost:4222"),
-			User:     getEnv("NATS_USER", "auth-server"),
+			User:     getEnv("NATS_USERNAME", "auth-server"),
 			Password: getEnv("NATS_PASSWORD", "auth-secret"),
 		},
 		Server: ServerConfig{
