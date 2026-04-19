@@ -1,0 +1,51 @@
+{
+  "service": "s3-service",
+  "version": "1.0.0",
+  "type": "internal-docs",
+  "description": "Internal engineering documentation for the S3 service. Covers architecture, runtime behavior, storage engine, IAM, and event-driven design.",
+  "audience": "engineers",
+  "visibility": "internal-only",
+
+  "categories": [
+    {
+      "title": "System Architecture",
+      "items": [
+        { "title": "Architecture Overview", "slug": "s3-architecture-overview" },
+        { "title": "Core Components Breakdown", "slug": "s3-core-components" },
+        { "title": "Request Lifecycle", "slug": "s3-request-lifecycle" },
+        { "title": "Startup Lifecycle", "slug": "s3-startup-lifecycle" }
+      ]
+    },
+    {
+      "title": "Storage Layer (MinIO)",
+      "items": [
+        { "title": "Storage Engine Design", "slug": "s3-storage-engine" },
+        { "title": "Bucket Model", "slug": "s3-bucket-model" },
+        { "title": "Object Operations Flow", "slug": "s3-object-operations" }
+      ]
+    },
+    {
+      "title": "IAM & Security",
+      "items": [
+        { "title": "IAM Architecture", "slug": "s3-iam-architecture" },
+        { "title": "Authentication Flow", "slug": "s3-auth-flow" },
+        { "title": "Authorization Model", "slug": "s3-authz-model" }
+      ]
+    },
+    {
+      "title": "Event System (NATS)",
+      "items": [
+        { "title": "Event-Driven Architecture", "slug": "s3-event-system" },
+        { "title": "Event Types", "slug": "s3-event-types" },
+        { "title": "Metrics & Analytics Pipeline", "slug": "s3-metrics-pipeline" }
+      ]
+    },
+    {
+      "title": "Development",
+      "items": [
+        { "title": "Local Development Setup", "slug": "s3-local-dev" },
+        { "title": "Debugging Guide", "slug": "s3-debugging" }
+      ]
+    }
+  ]
+}

@@ -1,116 +1,187 @@
 package application
 
 import (
-	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-// DocPage represents a single documentation page in the manifest
-type DocPage struct {
-	Slug  string `json:"slug"`
+// =====================
+// Models (match frontend)
+// =====================
+
+type DocItem struct {
 	Title string `json:"title"`
+	Slug  string `json:"slug"`
 }
 
-// DocsManifest represents the collection of available documentation pages
-type DocsManifest struct {
-	Pages []DocPage `json:"pages"`
+type DocCategory struct {
+	Title string    `json:"title"`
+	Items []DocItem `json:"items"`
 }
 
-// DocsService handles retrieval of documentation manifest and content
+type DocManifest struct {
+	Service    string        `json:"service"`
+	Version    string        `json:"version,omitempty"`
+	Categories []DocCategory `json:"categories"`
+}
+
+type Metadata struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Icon        string   `json:"icon"`
+	LastUpdated string   `json:"lastUpdated"`
+	Tags        []string `json:"tags"`
+}
+
+type DocResponse struct {
+	Metadata Metadata `json:"metadata"`
+	Content  string   `json:"content"`
+}
+
+// =====================
+// Service
+// =====================
+
 type DocsService struct {
-	docsDir string
+	basePath string // e.g. "./docs"
 }
 
-// NewDocsService creates a new documentation service
-func NewDocsService(docsDir string) *DocsService {
-	return &DocsService{docsDir: docsDir}
+func NewDocsService(basePath string) *DocsService {
+	return &DocsService{basePath: basePath}
 }
 
-// GetManifest returns the list of available documentation pages
-func (s *DocsService) GetManifest(ctx context.Context) (*DocsManifest, error) {
-	files, err := os.ReadDir(s.docsDir)
+// =====================
+// Public API
+// =====================
+
+// GetManifest loads manifest.json from public/internal folder
+func (s *DocsService) GetManifest(internal bool) (*DocManifest, error) {
+	scope := s.getScope(internal)
+
+	path := filepath.Join(s.basePath, scope, "manifest.json")
+
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read docs directory: %w", err)
+		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	manifest := &DocsManifest{
-		Pages: []DocPage{},
+	var manifest DocManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	// Define desired order of slugs
-	order := []string{
-		"rds-overview",
-		"rds-create",
-		"rds-modify",
-		"rds-clusters",
-		"rds-snapshots",
-		"rds-volumes",
-		"rds-restore",
-	}
-
-	// Map for quick lookup
-	fileMap := make(map[string]bool)
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".md") {
-			fileMap[strings.TrimSuffix(file.Name(), ".md")] = true
-		}
-	}
-
-	// Add pages in defined order if file exists
-	for _, slug := range order {
-		if fileMap[slug] {
-			manifest.Pages = append(manifest.Pages, DocPage{
-				Slug:  slug,
-				Title: s.formatTitle(slug),
-			})
-			delete(fileMap, slug)
-		}
-	}
-
-	// Add any remaining files
-	for slug := range fileMap {
-		manifest.Pages = append(manifest.Pages, DocPage{
-			Slug:  slug,
-			Title: s.formatTitle(slug),
-		})
-	}
-
-	return manifest, nil
+	return &manifest, nil
 }
 
-// GetDocContent returns the markdown content for a specific slug
-func (s *DocsService) GetDocContent(ctx context.Context, slug string) (string, error) {
-	// Security: basic check to prevent directory traversal
+// GetDoc loads a markdown file and parses frontmatter
+func (s *DocsService) GetDoc(slug string, internal bool) (*DocResponse, error) {
+	if !isValidSlug(slug) {
+		return nil, errors.New("invalid slug")
+	}
+
+	scope := s.getScope(internal)
+	path := filepath.Join(s.basePath, scope, slug+".md")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.New("not found")
+	}
+
+	meta, content := parseMarkdownWithFrontmatter(string(data))
+
+	return &DocResponse{
+		Metadata: meta,
+		Content:  content,
+	}, nil
+}
+
+// =====================
+// Helpers
+// =====================
+
+func (s *DocsService) getScope(internal bool) string {
+	if internal {
+		return "internal"
+	}
+	return "public"
+}
+
+// Prevent path traversal attacks
+func isValidSlug(slug string) bool {
+	if slug == "" {
+		return false
+	}
 	if strings.Contains(slug, "..") || strings.Contains(slug, "/") || strings.Contains(slug, "\\") {
-		return "", fmt.Errorf("invalid slug format")
+		return false
 	}
-
-	filePath := filepath.Join(s.docsDir, slug+".md")
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("documentation not found")
-		}
-		return "", fmt.Errorf("failed to read documentation file: %w", err)
-	}
-
-	return string(content), nil
+	return true
 }
 
-func (s *DocsService) formatTitle(slug string) string {
-	parts := strings.Split(slug, "-")
-	for i, part := range parts {
-		if len(part) > 0 {
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
+// =====================
+// Markdown Parser
+// =====================
+
+func parseMarkdownWithFrontmatter(input string) (Metadata, string) {
+	var meta Metadata
+
+	parts := strings.SplitN(input, "---", 3)
+
+	// No frontmatter
+	if len(parts) < 3 {
+		meta.LastUpdated = time.Now().Format("2006-01-02")
+		return meta, strings.TrimSpace(input)
+	}
+
+	rawMeta := parts[1]
+	content := parts[2]
+
+	lines := strings.Split(rawMeta, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		if line == "" {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "title:"):
+			meta.Title = cleanValue(line, "title:")
+		case strings.HasPrefix(line, "description:"):
+			meta.Description = cleanValue(line, "description:")
+		case strings.HasPrefix(line, "icon:"):
+			meta.Icon = cleanValue(line, "icon:")
+		case strings.HasPrefix(line, "tags:"):
+			meta.Tags = parseTags(cleanValue(line, "tags:"))
 		}
 	}
-	title := strings.Join(parts, " ")
-	// Special handling for RDS prefix
-	if strings.HasPrefix(strings.ToLower(title), "rds ") {
-		title = "RDS " + title[4:]
+
+	meta.LastUpdated = time.Now().Format("2006-01-02")
+
+	return meta, strings.TrimSpace(content)
+}
+
+func cleanValue(line, prefix string) string {
+	val := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	val = strings.Trim(val, `"`)
+	return val
+}
+
+func parseTags(input string) []string {
+	input = strings.Trim(input, "[]")
+	parts := strings.Split(input, ",")
+
+	var tags []string
+	for _, t := range parts {
+		tag := strings.TrimSpace(strings.Trim(t, `"`))
+		if tag != "" {
+			tags = append(tags, tag)
+		}
 	}
-	return title
+	return tags
 }

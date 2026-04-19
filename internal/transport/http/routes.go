@@ -25,7 +25,18 @@ func RegisterRoutes(router *gin.Engine, handlers *Handlers) {
 	registerConfigRoutes(v1, handlers.Config)
 	registerDocsRoutes(v1, handlers.Docs)
 }
-
+func registerDocsRoutes(v1 *gin.RouterGroup, handler *DocsHandler) {
+	docs := v1.Group("/docs")
+	{
+		docs.GET("", handler.GetPublicManifest)
+		docs.GET("/:slug", handler.GetPublicDoc)
+	}
+	internal := v1.Group("/internal/docs")
+	{
+		internal.GET("", handler.GetInternalManifest)
+		internal.GET("/:slug", handler.GetInternalDoc)
+	}
+}
 func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 	databases := api.Group("/databases")
 	{
@@ -111,15 +122,4 @@ func registerConfigRoutes(v1 *gin.RouterGroup, handler *ConfigHandler) {
 	v1.PUT("/instances/:id/config", handler.SetConfiguration)
 	v1.GET("/instances/:id/config/history", handler.GetConfigurationHistory)
 }
-
-// registerDocsRoutes registers all documentation routes
-func registerDocsRoutes(v1 *gin.RouterGroup, handler *DocsHandler) {
-	if handler == nil {
-		return
-	}
-	docs := v1.Group("/docs")
-	{
-		docs.GET("", handler.GetManifest)
-		docs.GET("/:slug", handler.GetDocContent)
-	}
-}
+ 

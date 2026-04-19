@@ -1,55 +1,56 @@
 package http
 
 import (
-	"net/http"
 	"rds/internal/application"
 
 	"github.com/gin-gonic/gin"
 )
 
-// DocsHandler handles requests for system documentation
+
 type DocsHandler struct {
-	docsService *application.DocsService
+	service *application.DocsService
 }
-
-// NewDocsHandler creates a new documentation handler
-func NewDocsHandler(docsService *application.DocsService) *DocsHandler {
-	return &DocsHandler{
-		docsService: docsService,
-	}
+func NewDocsHandler(service *application.DocsService) *DocsHandler {
+	return &DocsHandler{service: service}
 }
-
-// GetManifest returns the structured table of contents for documentation
-func (h *DocsHandler) GetManifest(c *gin.Context) {
-	manifest, err := h.docsService.GetManifest(c.Request.Context())
+func (h *DocsHandler) GetPublicManifest(c *gin.Context) {
+	data, err := h.service.GetManifest(false)
 	if err != nil {
-		respond(c, http.StatusInternalServerError, "failed to load documentation manifest", nil)
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-
-	respond(c, http.StatusOK, "Documentation manifest fetched successfully", manifest)
+	c.JSON(200, gin.H{"data": data})
 }
 
-// GetDocContent returns the raw markdown content for a specific documentation page
-func (h *DocsHandler) GetDocContent(c *gin.Context) {
+func (h *DocsHandler) GetInternalManifest(c *gin.Context) {
+	data, err := h.service.GetManifest(true)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"data": data})
+}
+
+func (h *DocsHandler) GetPublicDoc(c *gin.Context) {
 	slug := c.Param("slug")
-	if slug == "" {
-		respond(c, http.StatusBadRequest, "slug is required", nil)
-		return
-	}
 
-	content, err := h.docsService.GetDocContent(c.Request.Context(), slug)
+	doc, err := h.service.GetDoc(slug, false)
 	if err != nil {
-		if err.Error() == "documentation not found" {
-			respond(c, http.StatusNotFound, "documentation page not found", nil)
-			return
-		}
-		respond(c, http.StatusInternalServerError, "failed to read documentation content", nil)
+		c.JSON(404, gin.H{"error": "not found"})
 		return
 	}
 
-	respond(c, http.StatusOK, "Documentation content fetched successfully", gin.H{
-		"slug":    slug,
-		"content": content,
-	})
+	c.JSON(200, gin.H{"data": doc})
+}
+
+func (h *DocsHandler) GetInternalDoc(c *gin.Context) {
+	slug := c.Param("slug")
+
+	doc, err := h.service.GetDoc(slug, true)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "not found"})
+		return
+	}
+
+	c.JSON(200, gin.H{"data": doc})
 }
