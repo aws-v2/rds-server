@@ -28,6 +28,7 @@ RUN apk --no-cache add ca-certificates
 
 # Copy the binary from the builder stage
 COPY --from=builder /app/rds-server .
+COPY --from=builder /app/docs ./docs
 
 # Copy migrations (critical for database synchronization)
 COPY --from=builder /app/internal/infrastructure/database/migrations ./internal/infrastructure/database/migrations
