@@ -27,17 +27,19 @@ type ScalingService struct {
 	repo         domain.RepositoryPort
 	dockerClient domain.DockerPort
 	nats         *event.NATSAdapter
+	natsPrefix   string
 	stopChan     chan struct{}
 
 	memoryTiers []int64 // bytes
 	cpuTiers    []int64 // CPU shares
 }
 
-func NewScalingService(repo domain.RepositoryPort, dockerClient domain.DockerPort, nats *event.NATSAdapter) *ScalingService {
+func NewScalingService(repo domain.RepositoryPort, dockerClient domain.DockerPort, nats *event.NATSAdapter, natsPrefix string) *ScalingService {
 	return &ScalingService{
 		repo:         repo,
 		dockerClient: dockerClient,
 		nats:         nats,
+		natsPrefix:   natsPrefix,
 		stopChan:     make(chan struct{}),
 		// Strategy: Discrete tiers for stability
 		memoryTiers: []int64{
@@ -59,8 +61,8 @@ func NewScalingService(repo domain.RepositoryPort, dockerClient domain.DockerPor
 func (s *ScalingService) Start() {
 	log.Println("[SCALING] Starting Vertical Scaling Service...")
 	
-	s.nats.Subscribe("dev.rds.v1.scale.out", s.handleScalingMessage)
-	s.nats.Subscribe("dev.rds.v1.scale.in", s.handleScalingMessage)
+	s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.out", s.natsPrefix), s.handleScalingMessage)
+	s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.in", s.natsPrefix), s.handleScalingMessage)
 }
 
 func (s *ScalingService) handleScalingMessage(m *nats.Msg) {

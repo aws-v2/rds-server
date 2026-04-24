@@ -1,4 +1,4 @@
-name: Prod deployment.
+name: Prod deployment
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx.
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
@@ -20,42 +20,52 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: qarani/rds-server:latest
+          tags: qarani/rds-server:prod
 
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USERNAME }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          passphrase: ${{ secrets.PROD_SSH_PASSPHRASE }}
           script: |
-            docker pull qarani/rds-server:latest
-            docker stop rds-server || true
-            docker rm rds-server || true
-            docker network create mini-aws-network || true
-            docker run -d --name rds-server \
-              --network mini-aws-network \
-              -p 8087:8087 \
-              -e APP_PROFILE=prod \
-              -e RDS_PORT=8087 \
-              -e DB_HOST=${{ secrets.PROD_DB_HOST }} \
+            docker network create aws-prod-network || true
+            docker pull qarani/rds-server:prod
+            docker stop rds-server-prod || true
+            docker rm rds-server-prod || true
+            docker run -d \
+              --name rds-server-prod \
+              --network aws-prod-network \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -p 8805:8805 \
+              -e APP_PROFILE=STAGING \
+              -e EUREKA_HOSTNAME=rds-server-prod \
+              -e EUREKA_IP_ADDR=127.0.0.1 \
+              -e RDS_PORT=8805 \
+              -e DB_HOST=postgres-prod \
               -e DB_PORT=5432 \
-              -e DB_USER=postgres \
-              -e DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }} \
+              -e DB_USER=postgres-prod-user \
+              -e DB_PASSWORD=postgres-prod-password \
               -e DB_NAME=rds_db \
-              -e NATS_URL=${{ secrets.PROD_NATS_URL }} \
-              -e NATS_USER=auth-server \
-              -e NATS_PASSWORD=${{ secrets.PROD_NATS_PASSWORD }} \
-              qarani/rds-server:latest
+              -e NATS_URL=nats://nats-prod:4222 \
+              -e NATS_USERNAME=nats-prod-user \
+              -e NATS_PASSWORD=nats-prod-password \
+              -e EUREKA_SERVER_URL=http://discovery-server-prod:8761/eureka \
+              -e PUBLIC_HOST_IP=192.168.1.7 \
+              -e AWS_REGION=eu-north-1 \
+              qarani/rds-server:prod
+
+
+
+

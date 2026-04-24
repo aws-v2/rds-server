@@ -9,6 +9,7 @@ import (
 	"rds/internal/domain"
 	"rds/internal/messaging"
 	"rds/internal/utils"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -171,34 +172,67 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		idempotencyKeyPtr = &req.IdempotencyKey
 	}
 
-	// 4. Persist Intended State
-	dbEntity := &domain.Database{
-		ID:             dbID,
-		AccountID:      req.OwnerID,
-		ARN:            arn,
-		Name:           req.Name,
-		PhysicalDBName: physicalDBName,
-		NodeHost:       nodeHost,
-		NodePort:       5432,
-		PrivateIP:      privateIP,
-		VPCID:          vpcID,
-		Status:         domain.DBStatusProvisioning,
-		IdempotencyKey: idempotencyKeyPtr,
-	}
+	// 4. Persist Intended State (with retry for network conflicts)
+	var dbEntity *domain.Database
+	var credEntity *domain.Credential
+	var opEntity *domain.Operation
+	var err error
+	
+	maxNetworkRetries := 3
+	for attempt := 0; attempt < maxNetworkRetries; attempt++ {
+		dbEntity = &domain.Database{
+			ID:             dbID,
+			AccountID:      req.OwnerID,
+			ARN:            arn,
+			Name:           req.Name,
+			PhysicalDBName: physicalDBName,
+			NodeHost:       nodeHost,
+			NodePort:       5432,
+			PrivateIP:      privateIP,
+			VPCID:          vpcID,
+			Status:         domain.DBStatusProvisioning,
+			IdempotencyKey: idempotencyKeyPtr,
+		}
 
-	credEntity := &domain.Credential{
-		RoleName:          roleName,
-		EncryptedPassword: password, // Note: In prod, encrypt this with KMS!
-		IsMaster:          true,
-		Status:            domain.CredStatusActive,
-	}
+		credEntity = &domain.Credential{
+			RoleName:          roleName,
+			EncryptedPassword: password,
+			IsMaster:          true,
+			Status:            domain.CredStatusActive,
+		}
 
-	opEntity := &domain.Operation{
-		Type:   domain.OpTypeProvisionDB,
-		Status: domain.OpStatusRunning, // Mark as running immediately for synchronous execution
-	}
+		opEntity = &domain.Operation{
+			Type:   domain.OpTypeProvisionDB,
+			Status: domain.OpStatusRunning,
+		}
 
-	if err := s.repo.CreateDatabaseTx(ctx, dbEntity, credEntity, opEntity); err != nil {
+		err = s.repo.CreateDatabaseTx(ctx, dbEntity, credEntity, opEntity)
+		if err == nil {
+			break // Success!
+		}
+
+		// Check if it's a duplicate node_host_port conflict
+		if s.isDuplicateNodeHostError(err) && s.publisher != nil && attempt < maxNetworkRetries-1 {
+			log.Printf("[RDS] Detected NodeHost conflict for IP %s (attempt %d/%d). Reassigning...", nodeHost, attempt+1, maxNetworkRetries)
+			
+			// 1. Release the conflicting IP
+			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
+			
+			// 2. Request a NEW IP
+			pIP, gw, br, netErr := s.publisher.PrepareInstanceNetwork(req.OwnerID, dbID, vpcID)
+			if netErr != nil {
+				return nil, fmt.Errorf("failed to re-prepare network after conflict: %w", netErr)
+			}
+			privateIP = pIP
+			gateway = gw
+			bridgeName = br
+			nodeHost = privateIP
+			
+			log.Printf("[VPC] RDS instance %s reassigned to new IP: %s", dbID, privateIP)
+			continue
+		}
+
+		// If we're here, it's either not a conflict error or we're out of retries
 		if s.publisher != nil {
 			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
 		}
@@ -245,11 +279,12 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	}
 
 	if err := s.dockerClient.StartContainer(ctx, containerID); err != nil {
+		log.Printf("[RDS] Failed to start container %s, rolling back: %v", dbEntity.ID, err)
 		if s.publisher != nil {
 			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
 		}
 		_ = s.dockerClient.RemoveContainer(ctx, containerID)
-		_ = s.repo.UpdateDatabaseStatus(ctx, dbEntity.ID, domain.DBStatusFailed)
+		_ = s.repo.HardDeleteDatabase(ctx, dbEntity.ID)
 		return nil, fmt.Errorf("failed to start database container: %w", err)
 	}
 
@@ -577,6 +612,7 @@ func (s *ClaudeDBService) StopDatabase(ctx context.Context, id, accountID string
 }
 
 // ModifyDatabase handles changes to database configuration, including VPC hopping
+// ModifyDatabase handles changes to database configuration, including VPC hopping
 func (s *ClaudeDBService) ModifyDatabase(ctx context.Context, id, accountID, newVpcID string) error {
 	db, err := s.GetDatabase(ctx, id, accountID)
 	if err != nil {
@@ -721,4 +757,14 @@ func (s *ClaudeDBService) DeleteScalingPolicy(ctx context.Context, tenantID, pol
 		return fmt.Errorf("messaging publisher is not configured")
 	}
 	return s.publisher.DeleteScalingPolicy(tenantID, policyID)
+}
+
+func (s *ClaudeDBService) isDuplicateNodeHostError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Check for PostgreSQL unique constraint name or standard "duplicate key" error
+	errMsg := err.Error()
+	return (strings.Contains(errMsg, "unique_node_host_port") || 
+		(strings.Contains(errMsg, "duplicate key") && strings.Contains(errMsg, "node_host")))
 }

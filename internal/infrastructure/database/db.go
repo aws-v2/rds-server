@@ -22,7 +22,9 @@ type Config struct {
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
+	NatsPrefix      string
 }
+
 
 // NewPostgresDB creates a new PostgreSQL database connection
 func NewPostgresDB(cfg Config) (*sql.DB, error) {

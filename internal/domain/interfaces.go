@@ -32,6 +32,7 @@ type RepositoryPort interface {
 	UpdateDatabasePublicPort(ctx context.Context, id string, publicPort int) error
 	UpdateDatabaseNetwork(ctx context.Context, id, vpcID, privateIP, nodeHost string) error
 	DeleteDatabase(ctx context.Context, id string) error
+	HardDeleteDatabase(ctx context.Context, id string) error
 	GetActiveCredential(ctx context.Context, databaseID string) (*Credential, error)
 	// Volume operations
 	CreateVolume(ctx context.Context, vol *Volume) error
