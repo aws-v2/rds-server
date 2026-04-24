@@ -93,7 +93,7 @@ func main() {
 	var natsPublisher *messaging.NATSPublisher
 	if cfg.NATS.URL != "" {
 		logger.Log.Info("Initializing NATS Publisher", zap.String("url", cfg.NATS.URL))
-		natsPublisher, err = messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password)
+		natsPublisher, err = messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.Prefix)
 		if err != nil {
 			logger.Log.Error("Failed to initialize NATS Publisher", zap.Error(err))
 		} else {
@@ -113,6 +113,7 @@ func main() {
 		MaxIdleConns:    cfg.DB.MaxIdleConns,
 		ConnMaxLifetime: cfg.DB.ConnMaxLifetime,
 		ConnMaxIdleTime: cfg.DB.ConnMaxIdleTime,
+		NatsPrefix:      cfg.NATS.Prefix,
 	}
 
 	// TCP Reachability check for Postgres
@@ -199,7 +200,7 @@ func main() {
 	metricsCollector.Start()
 	defer metricsCollector.Stop()
 
-	scalingService := application.NewScalingService(repo, dockerAdapter, natsAdapter)
+	scalingService := application.NewScalingService(repo, dockerAdapter, natsAdapter, cfg.NATS.Prefix)
 	scalingService.Start()
 	defer scalingService.Stop()
 

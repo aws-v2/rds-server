@@ -30,8 +30,9 @@ type Publisher interface {
 
 // NATSPublisher implements the Publisher interface using NATS Request-Response pattern.
 type NATSPublisher struct {
-	nc *nats.Conn
-}
+	nc     *nats.Conn
+	prefix string
+}	
 
 type prepareRequest struct {
 	CorrelationID string `json:"correlation_id"`
@@ -136,17 +137,17 @@ type instanceTokenResponse struct {
 }
 
 // NewNATSPublisher connects to NATS and returns a NATSPublisher instance.
-func NewNATSPublisher(url, user, password string) (*NATSPublisher, error) {
+func NewNATSPublisher(url, user, password, prefix string) (*NATSPublisher, error) {
 	opts := []nats.Option{
 		nats.UserInfo(user, password),
 	}
-
+ 
 	nc, err := nats.Connect(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
-
-	return &NATSPublisher{nc: nc}, nil
+ 
+	return &NATSPublisher{nc: nc, prefix: prefix}, nil
 }
 
 // PrepareInstanceNetwork sends a network preparation request to the Network Service via NATS.
@@ -165,7 +166,7 @@ func (p *NATSPublisher) PrepareInstanceNetwork(tenantID, resourceID, vpcID strin
 	}
 	log.Printf("[RDS-NATS] Sending PrepareInstanceNetwork request: %s", string(reqData))
 
-	msg, err := p.nc.Request("dev.network.v1.instance.prepare", reqData, 5*time.Second)
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.instance.prepare", p.prefix), reqData, 5*time.Second)
 	if err != nil {
 		return "", "", "", fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -200,7 +201,7 @@ func (p *NATSPublisher) ReleaseInstanceNetwork(tenantID, resourceID, vpcID strin
 	}
 	log.Printf("[RDS-NATS] Sending ReleaseInstanceNetwork request: %s", string(reqData))
 
-	msg, err := p.nc.Request("dev.network.v1.instance.release", reqData, 5*time.Second)
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.instance.release", p.prefix), reqData, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -233,7 +234,7 @@ func (p *NATSPublisher) GetDefaultVPC(tenantID string) (string, string, error) {
 	}
 	log.Printf("[RDS-NATS] Sending GetDefaultVPC request: %s", string(reqData))
 
-	msg, err := p.nc.Request("dev.network.v1.vpc.default.get", reqData, 5*time.Second)
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.vpc.default.get", p.prefix), reqData, 5*time.Second)
 	if err != nil {
 		return "", "", fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -277,7 +278,7 @@ func (p *NATSPublisher) ExposeDatabase(tenantID, resourceID, privateIP, publicIP
 	}
 	log.Printf("[RDS-NATS] Sending ExposeDatabase request: %s", string(reqData))
 
-	msg, err := p.nc.Request("dev.network.v1.rds.expose", reqData, 5*time.Second)
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.rds.expose", p.prefix), reqData, 5*time.Second)
 	if err != nil {
 		return 0, fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -310,7 +311,7 @@ func (p *NATSPublisher) UnexposeDatabase(resourceID string) error {
 	}
 	log.Printf("[RDS-NATS] Sending UnexposeDatabase request: %s", string(reqData))
 
-	msg, err := p.nc.Request("dev.network.v1.rds.unexpose", reqData, 5*time.Second)
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.rds.unexpose", p.prefix), reqData, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -343,7 +344,7 @@ func (p *NATSPublisher) ListVPCs(tenantID string) ([]domain.VPC, error) {
 	}
 	log.Printf("[RDS-NATS] Sending ListVPCs request for tenant %s", tenantID)
 
-	msg, err := p.nc.Request("dev.network.v1.vpc.list", reqData, 5*time.Second)
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.vpc.list", p.prefix), reqData, 5*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -376,7 +377,7 @@ func (p *NATSPublisher) CreateVPC(tenantID, vpcName, requestedBy string) error {
 	}
 
 	log.Printf("[RDS-NATS] Publishing CreateVPC event for tenant %s, vpc %s", tenantID, vpcName)
-	if err := p.nc.Publish("dev.network.v1.vpc.create", eventData); err != nil {
+	if err := p.nc.Publish(fmt.Sprintf("%s.network.vpc.create", p.prefix), eventData); err != nil {
 		return fmt.Errorf("failed to publish create VPC event: %w", err)
 	}
 
@@ -396,7 +397,7 @@ func (p *NATSPublisher) ReconcileVPCs() error {
 	}
 
 	log.Printf("[RDS-NATS] Requesting global VPC reconciliation")
-	msg, err := p.nc.Request("dev.network.v1.vpc.reconcile", reqData, 30*time.Second) // Long timeout for reconciliation
+	msg, err := p.nc.Request(fmt.Sprintf("%s.network.vpc.reconcile", p.prefix), reqData, 30*time.Second) // Long timeout for reconciliation
 	if err != nil {
 		return fmt.Errorf("NATS request failed: %w", err)
 	}
@@ -417,21 +418,21 @@ func (p *NATSPublisher) ReconcileVPCs() error {
 // RequestInstanceToken asks the IAM service for a scoped JWT token for the metrics agent.
 func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string, error) {
 	correlationID := uuid.New().String()
-	subject := "dev.iam.v1.token.generate"
-
+	subject := fmt.Sprintf("%s.iam.token.generate", p.prefix)
+ 
 	req := instanceTokenRequest{
 		InstanceID: instanceID,
 		UserID:     userID,
 	}
-
+ 
 	data, err := json.Marshal(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal instance token request: %w", err)
 	}
-
+ 
 	log.Printf("[RDS-NATS] [REQUEST] subject=%s correlation_id=%s user_id=%s instance_id=%s",
 		subject, correlationID, userID, instanceID)
-
+ 
 	msg, err := p.nc.Request(subject, data, 5*time.Second)
 	if err != nil {
 		log.Printf("[RDS-NATS] [ERROR] RequestInstanceToken failed: correlation_id=%s error=%v", correlationID, err)
@@ -460,7 +461,7 @@ func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string,
 // PublishScalingPolicy publishes a scaling policy creation event to the metrics service.
 func (p *NATSPublisher) PublishScalingPolicy(tenantID string, policy domain.ScalingPolicyRequest) error {
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.create"
+	subject := fmt.Sprintf("%s.metrics.scaling_policy.create", p.prefix)
 
 	event := map[string]interface{}{
 		"correlation_id": correlationID,
@@ -488,7 +489,7 @@ func (p *NATSPublisher) PublishScalingPolicy(tenantID string, policy domain.Scal
 // GetScalingPolicies requests the scaling policies for a tenant from the metrics service.
 func (p *NATSPublisher) GetScalingPolicies(tenantID string) ([]domain.ScalingPolicy, error) {
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.list"
+	subject := fmt.Sprintf("%s.metrics.scaling_policy.list", p.prefix)
 
 	req := map[string]string{
 		"correlation_id": correlationID,
@@ -528,7 +529,7 @@ func (p *NATSPublisher) GetScalingPolicies(tenantID string) ([]domain.ScalingPol
 // UpdateScalingPolicy publishes an update event for a scaling policy.
 func (p *NATSPublisher) UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error {
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.update"
+	subject := fmt.Sprintf("%s.metrics.scaling_policy.update", p.prefix)
 
 	event := map[string]interface{}{
 		"correlation_id": correlationID,
@@ -557,7 +558,7 @@ func (p *NATSPublisher) UpdateScalingPolicy(tenantID, policyID string, req domai
 // DeleteScalingPolicy publishes a delete event for a scaling policy.
 func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 	correlationID := uuid.New().String()
-	subject := "dev.metrics.v1.scaling_policy.delete"
+	subject := fmt.Sprintf("%s.metrics.scaling_policy.delete", p.prefix)
 
 	event := map[string]interface{}{
 		"correlation_id": correlationID,

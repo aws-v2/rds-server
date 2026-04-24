@@ -259,6 +259,19 @@ func (r *PostgresRepository) DeleteDatabase(ctx context.Context, id string) erro
 	return nil
 }
 
+func (r *PostgresRepository) HardDeleteDatabase(ctx context.Context, id string) error {
+	query := `DELETE FROM databases WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to hard delete database: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *PostgresRepository) GetActiveCredential(ctx context.Context, databaseID string) (*domain.Credential, error) {
 	query := `
 		SELECT id, database_id, role_name, encrypted_password, is_master, status, created_at, updated_at
