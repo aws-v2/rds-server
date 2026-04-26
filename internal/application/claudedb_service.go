@@ -22,7 +22,7 @@ func generateRandomHex(n int) string {
 		return uuid.New().String()[:n*2] // Fallback
 	}
 	return hex.EncodeToString(bytes)
-}
+}	
 
 // CreateDatabaseRequest represents the request to provision a database
 type CreateDatabaseRequest struct {
