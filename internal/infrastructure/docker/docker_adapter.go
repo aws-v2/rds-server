@@ -290,6 +290,29 @@ func (d *DockerAdapter) UpdateContainerResources(ctx context.Context, containerI
 	return nil
 }
 
+// EnsureNetwork checks if a Docker network exists, and creates it if not.
+func (d *DockerAdapter) EnsureNetwork(ctx context.Context, name string) error {
+	_, err := d.client.NetworkInspect(ctx, name, network.InspectOptions{})
+	if err == nil {
+		return nil // Network already exists
+	}
+
+	// Create the network if it doesn't exist
+	log.Printf("[DOCKER] Network %s not found, creating...", name)
+	_, err = d.client.NetworkCreate(ctx, name, network.CreateOptions{
+		Driver: "bridge",
+		Options: map[string]string{
+			"com.docker.network.bridge.name": name,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create docker network %s: %w", name, err)
+	}
+
+	log.Printf("[DOCKER] Successfully created network %s", name)
+	return nil
+}
+
 // Close closes the Docker client connection
 func (d *DockerAdapter) Close() error {
 	return d.client.Close()

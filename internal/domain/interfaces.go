@@ -93,6 +93,7 @@ type DockerPort interface {
 	GetContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error)
 	GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error)
 	UpdateContainerResources(ctx context.Context, containerID string, cpuShares int64, memoryBytes int64) error
+	EnsureNetwork(ctx context.Context, name string) error
 
 	// Docker Volume operations
 	CreateVolume(ctx context.Context, name string) error

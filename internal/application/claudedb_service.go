@@ -151,6 +151,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		}
 
 		pIP, gw, br, err := s.publisher.PrepareInstanceNetwork(req.OwnerID, dbID, vpcID)
+		log.Printf("[VPC] RDS privateIP: %s", pIP)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare instance network: %w", err)
 		}
@@ -160,8 +161,12 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 
 		log.Printf("[VPC] RDS instance %s assigned to VPC %s (bridge: %s, IP: %s)",
 			dbID, vpcID, bridgeName, privateIP)
-	}
 
+		// 3.5 Ensure Docker network exists
+		if err := s.dockerClient.EnsureNetwork(ctx, bridgeName); err != nil {
+			return nil, fmt.Errorf("failed to ensure docker network: %w", err)
+		}
+	}
 	nodeHost := privateIP
 	if nodeHost == "" {
 		nodeHost = "localhost" // Fallback
@@ -213,7 +218,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 
 		// Check if it's a duplicate node_host_port conflict
 		if s.isDuplicateNodeHostError(err) && s.publisher != nil && attempt < maxNetworkRetries-1 {
-			log.Printf("[RDS] Detected NodeHost conflict for IP %s (attempt %d/%d). Reassigning...", nodeHost, attempt+1, maxNetworkRetries)
+			log.Printf("[RDS] Detected NodeHost conflict for IP %s (attempt %d/%d). Reassigning...due to error: %v", nodeHost, attempt+1, maxNetworkRetries, err)
 			
 			// 1. Release the conflicting IP
 			_ = s.publisher.ReleaseInstanceNetwork(req.OwnerID, dbID, vpcID)
@@ -229,6 +234,11 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 			nodeHost = privateIP
 			
 			log.Printf("[VPC] RDS instance %s reassigned to new IP: %s", dbID, privateIP)
+
+			// Ensure NEW Docker network exists
+			if err := s.dockerClient.EnsureNetwork(ctx, bridgeName); err != nil {
+				return nil, fmt.Errorf("failed to ensure docker network after conflict: %w", err)
+			}
 			continue
 		}
 
@@ -400,6 +410,11 @@ func (s *ClaudeDBService) AssignVPC(ctx context.Context, accountID, databaseID, 
 	privateIP, gateway, bridgeName, err := s.publisher.PrepareInstanceNetwork(accountID, databaseID, newVPCID)
 	if err != nil {
 		return fmt.Errorf("failed to prepare new instance network: %w", err)
+	}
+
+	// 2.5 Ensure Docker network exists
+	if err := s.dockerClient.EnsureNetwork(ctx, bridgeName); err != nil {
+		return fmt.Errorf("failed to ensure docker network for VPC assignment: %w", err)
 	}
 
 	// 3. Recreate docker container on new network
@@ -648,6 +663,11 @@ func (s *ClaudeDBService) ModifyDatabase(ctx context.Context, id, accountID, new
 			privateIP = pIP
 			gateway = gw
 			bridgeName = br
+
+			// d.5 Ensure Docker network exists
+			if err := s.dockerClient.EnsureNetwork(ctx, bridgeName); err != nil {
+				return fmt.Errorf("failed to ensure docker network for VPC hop: %w", err)
+			}
 		}
 
 		// e. Update metadata in DB
