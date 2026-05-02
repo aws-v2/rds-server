@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"time"
 )
 
@@ -17,13 +18,13 @@ type CreateInstanceRequest struct {
 
 // InstanceService handles database instance lifecycle management
 type InstanceService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	auditService *AuditService
 }
 
 // NewInstanceService creates a new instance service
-func NewInstanceService(repo domain.RepositoryPort, dockerClient domain.DockerPort, auditService *AuditService) *InstanceService {
+func NewInstanceService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort, auditService *AuditService) *InstanceService {
 	return &InstanceService{
 		repo:         repo,
 		dockerClient: dockerClient,
@@ -52,13 +53,13 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req CreateInstance
 
 	// Create container configuration
 	containerConfig := domain.ContainerConfig{
-		Name:     req.Name,
-		Image:    image,
-	    HostPort:     port,  // ← 1000, 1001... allocated per instance
-    ContainerPort: 5432,              // ← always 5432 inside the container
-		User:     req.User,
-		Password: req.Password,
-		OwnerID:  req.OwnerID,
+		Name:          req.Name,
+		Image:         image,
+		HostPort:      port, // ← 1000, 1001... allocated per instance
+		ContainerPort: 5432, // ← always 5432 inside the container
+		User:          req.User,
+		Password:      req.Password,
+		OwnerID:       req.OwnerID,
 		Environment: map[string]string{
 			"POSTGRES_DB": req.Name,
 		},

@@ -7,16 +7,17 @@ import (
 	"log"
 	"rds/internal/domain"
 
+	"encoding/json"
+
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
-	"encoding/json"
 	"github.com/docker/go-connections/nat"
 )
 
-// DockerAdapter implements domain.DockerPort
+// DockerAdapter implements interfaces.DockerPort
 type DockerAdapter struct {
 	client *client.Client
 }
@@ -101,6 +102,7 @@ func (d *DockerAdapter) PullImage(ctx context.Context, imageq string) error {
 
 	return nil
 }
+
 // CreateContainer creates a new Docker container
 func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.ContainerConfig) (string, error) {
 	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s HostPort=%d",
@@ -181,8 +183,7 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 func (d *DockerAdapter) StartContainer(ctx context.Context, containerID string) error {
 	log.Printf("---->> [DOCKER] StartContainer: initiating for container %s", containerID)
 
-	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{
-	}); err != nil {
+	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
 		log.Printf("---->> [DOCKER] StartContainer: failed for container %s: %v", containerID, err)
 		return fmt.Errorf("failed to start container %s: %w", containerID, err)
 	}
@@ -304,7 +305,7 @@ func (d *DockerAdapter) EnsureNetwork(ctx context.Context, name, gateway string)
 
 	// Create the network if it doesn't exist
 	log.Printf("[DOCKER] Network %s not found, creating with gateway %s...", name, gateway)
-	
+
 	// Infer subnet from gateway (e.g., 10.5.1.1 -> 10.5.1.0/24)
 	lastDot := -1
 	for i := len(gateway) - 1; i >= 0; i-- {
@@ -313,7 +314,7 @@ func (d *DockerAdapter) EnsureNetwork(ctx context.Context, name, gateway string)
 			break
 		}
 	}
-	
+
 	subnet := "10.0.0.0/16" // Very broad fallback
 	if lastDot != -1 {
 		subnet = gateway[:lastDot] + ".0/24"

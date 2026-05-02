@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"rds/internal/utils"
 
 	"github.com/google/uuid"
@@ -11,13 +12,13 @@ import (
 
 // SnapshotService manages RDS point-in-time backups
 type SnapshotService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	region       string
 	dbService    *ClaudeDBService
 }
 
-func NewSnapshotService(repo domain.RepositoryPort, dockerClient domain.DockerPort, region string, dbService *ClaudeDBService) *SnapshotService {
+func NewSnapshotService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort, region string, dbService *ClaudeDBService) *SnapshotService {
 	return &SnapshotService{
 		repo:         repo,
 		dockerClient: dockerClient,
@@ -182,15 +183,15 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 
 	// 8. Provision the new container wired to the cloned volume
 	containerConfig := domain.ContainerConfig{
-		Name:         fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
-		Image:        image,
-	    HostPort:     dbEntity.NodePort,  // ← 1000, 1001... allocated per instance
-    ContainerPort: 5432,              // ← always 5432 inside the container
-		User:         roleName,
-		Password:     password,
-		OwnerID:      req.AccountID,
-		VolumeSource: newVolumePath,
-		VolumeDest:   "/var/lib/postgresql/data",
+		Name:          fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
+		Image:         image,
+		HostPort:      dbEntity.NodePort, // ← 1000, 1001... allocated per instance
+		ContainerPort: 5432,              // ← always 5432 inside the container
+		User:          roleName,
+		Password:      password,
+		OwnerID:       req.AccountID,
+		VolumeSource:  newVolumePath,
+		VolumeDest:    "/var/lib/postgresql/data",
 		Environment: map[string]string{
 			"POSTGRES_DB":        physicalDBName,
 			"RESTORE_SOURCE_VOL": sourceVolumePath, // Informational label for operators

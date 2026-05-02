@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"rds/internal/domain"
 	"rds/internal/infrastructure/event"
+	"rds/internal/interfaces"
 	"sort"
 	"strings"
 	"time"
@@ -16,7 +16,7 @@ import (
 
 type ScalingAlarmPayload struct {
 	InstanceID   string `json:"instance_id"`
-	Action       string `json:"action"` // SCALE_OUT or SCALE_IN
+	Action       string `json:"action"`        // SCALE_OUT or SCALE_IN
 	ResourceType string `json:"resource_type"` // CPU or MEMORY
 	NewLimit     int64  `json:"new_limit"`
 	TenantID     string `json:"tenant_id"`
@@ -24,8 +24,8 @@ type ScalingAlarmPayload struct {
 }
 
 type ScalingService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	nats         *event.NATSAdapter
 	natsPrefix   string
 	stopChan     chan struct{}
@@ -34,7 +34,7 @@ type ScalingService struct {
 	cpuTiers    []int64 // CPU shares
 }
 
-func NewScalingService(repo domain.RepositoryPort, dockerClient domain.DockerPort, nats *event.NATSAdapter, natsPrefix string) *ScalingService {
+func NewScalingService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort, nats *event.NATSAdapter, natsPrefix string) *ScalingService {
 	return &ScalingService{
 		repo:         repo,
 		dockerClient: dockerClient,
@@ -60,7 +60,7 @@ func NewScalingService(repo domain.RepositoryPort, dockerClient domain.DockerPor
 
 func (s *ScalingService) Start() {
 	log.Println("[SCALING] Starting Vertical Scaling Service...")
-	
+
 	s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.out", s.natsPrefix), s.handleScalingMessage)
 	s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.in", s.natsPrefix), s.handleScalingMessage)
 }
@@ -72,7 +72,7 @@ func (s *ScalingService) handleScalingMessage(m *nats.Msg) {
 		return
 	}
 
-	log.Printf("[SCALING] Received %s trigger for %s (%s): %s", 
+	log.Printf("[SCALING] Received %s trigger for %s (%s): %s",
 		payload.Action, payload.InstanceID, payload.ResourceType, payload.Reason)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -116,7 +116,7 @@ func (s *ScalingService) handleScalingMessage(m *nats.Msg) {
 		return
 	}
 
-	log.Printf("[SCALING] SUCCESS Scall %s: CPU %d -> %d | MEM %d -> %d", 
+	log.Printf("[SCALING] SUCCESS Scall %s: CPU %d -> %d | MEM %d -> %d",
 		payload.Action, info.CPUShares, newCPUShares, info.Memory, newMemoryBytes)
 }
 
@@ -145,7 +145,7 @@ func (s *ScalingService) calculateNextTier(current int64, action string, tiers [
 }
 
 func (s *ScalingService) Stop() {
-	// Subscriptions are automatically closed when the connection is closed, 
+	// Subscriptions are automatically closed when the connection is closed,
 	// but we could explicitly unsubscribe if needed.
 	close(s.stopChan)
 }

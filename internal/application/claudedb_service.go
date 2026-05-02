@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"rds/internal/messaging"
 	"rds/internal/utils"
 	"strings"
@@ -25,7 +26,7 @@ func generateRandomHex(n int) string {
 		return uuid.New().String()[:n*2] // Fallback
 	}
 	return hex.EncodeToString(bytes)
-}	
+}
 
 // generateRandomVPCSubnet creates a random 10.x.y.0/24 subnet to minimize collision chances
 func generateRandomVPCSubnet() (subnet, gateway string) {
@@ -61,8 +62,8 @@ type CreateDatabaseResponse struct {
 }
 
 type ClaudeDBService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	publisher    messaging.Publisher
 	region       string
 	publicHostIP string
@@ -70,7 +71,7 @@ type ClaudeDBService struct {
 }
 
 // NewClaudeDBService creates a new ClaudeDB application service
-func NewClaudeDBService(repo domain.RepositoryPort, dockerClient domain.DockerPort, publisher messaging.Publisher, region, publicHostIP string) *ClaudeDBService {
+func NewClaudeDBService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort, publisher messaging.Publisher, region, publicHostIP string) *ClaudeDBService {
 	return &ClaudeDBService{
 		repo:         repo,
 		dockerClient: dockerClient,
@@ -126,17 +127,17 @@ func (s *ClaudeDBService) AllocateIP(ctx context.Context, vpcID string) (string,
 	// Step 3: Find first available IP based on the subnet (Simplified for now)
 	// We'll use the subnet defined in the VPC record directly.
 	// E.g. "10.5.1.0/24" -> We want to start from 10.5.1.2 since .1 is gateway
-	
+
 	// A robust implementation would use net.ParseCIDR and iterate.
 	// For this refactor, we'll keep it simple and increment from the gateway's last octet.
-	
+
 	gatewayParts := strings.Split(vpc.Gateway, ".")
 	if len(gatewayParts) != 4 {
 		return "", fmt.Errorf("invalid gateway format: %s", vpc.Gateway)
 	}
-	
+
 	prefix := fmt.Sprintf("%s.%s.%s.", gatewayParts[0], gatewayParts[1], gatewayParts[2])
-	
+
 	for i := 2; i < 254; i++ {
 		testIP := fmt.Sprintf("%s%d", prefix, i)
 		if !usedSet[testIP] {
@@ -292,7 +293,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	var dbEntity *domain.Database
 	var credEntity *domain.Credential
 	var opEntity *domain.Operation
-	
+
 	maxNetworkRetries := 3
 	for attempt := 0; attempt < maxNetworkRetries; attempt++ {
 		nodePort, pErr := s.repo.GetNextNodePort(ctx)
@@ -334,7 +335,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		// Check if it's a duplicate node_host_port conflict
 		if s.isDuplicateNodeHostError(err) && attempt < maxNetworkRetries-1 {
 			log.Printf("[RDS] Detected NodeHost conflict (attempt %d/%d). Reassigning...due to error: %v", attempt+1, maxNetworkRetries, err)
-			
+
 			log.Printf("[VPC] RDS instance %s reassigned to new host port", dbID)
 
 			// Ensure NEW Docker network exists
@@ -356,15 +357,15 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	}
 
 	containerConfig := domain.ContainerConfig{
-		Name:         fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
-		Image:        image,
-	    HostPort:     dbEntity.NodePort,  // ← 1000, 1001... allocated per instance
-    ContainerPort: 5432,              // ← always 5432 inside the container
-		User:         roleName,
-		Password:     password,
-		OwnerID:      req.OwnerID,
-		VolumeSource: fmt.Sprintf("/tmp/claudedb/volumes/%s/data", dbEntity.ID), // Note: Using /tmp for local testing on ec2
-		VolumeDest:   "/var/lib/postgresql/data",
+		Name:          fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
+		Image:         image,
+		HostPort:      dbEntity.NodePort, // ← 1000, 1001... allocated per instance
+		ContainerPort: 5432,              // ← always 5432 inside the container
+		User:          roleName,
+		Password:      password,
+		OwnerID:       req.OwnerID,
+		VolumeSource:  fmt.Sprintf("/tmp/claudedb/volumes/%s/data", dbEntity.ID), // Note: Using /tmp for local testing on ec2
+		VolumeDest:    "/var/lib/postgresql/data",
 		Environment: map[string]string{
 			"POSTGRES_DB": physicalDBName,
 		},
@@ -510,21 +511,21 @@ func (s *ClaudeDBService) AssignVPC(ctx context.Context, accountID, databaseID, 
 
 	// 3. Recreate docker container on new network
 	containerName := fmt.Sprintf("claudedb-prod-%s", db.ID)
-	
+
 	// Temporarily ignore stop/remove errors in case container is already gone.
 	_ = s.dockerClient.StopContainer(ctx, containerName)
 	_ = s.dockerClient.RemoveContainer(ctx, containerName)
 
 	containerConfig := domain.ContainerConfig{
-		Name:         containerName,
-		Image:        "docker.io/library/postgres:15-alpine",
-	    HostPort:     db.NodePort,  // ← 1000, 1001... allocated per instance
-    ContainerPort: 5432,              // ← always 5432 inside the container
-		User:         cred.RoleName,
-		Password:     cred.EncryptedPassword,
-		OwnerID:      accountID,
-		VolumeSource: fmt.Sprintf("/tmp/claudedb/volumes/%s/data", db.ID),
-		VolumeDest:   "/var/lib/postgresql/data",
+		Name:          containerName,
+		Image:         "docker.io/library/postgres:15-alpine",
+		HostPort:      db.NodePort, // ← 1000, 1001... allocated per instance
+		ContainerPort: 5432,        // ← always 5432 inside the container
+		User:          cred.RoleName,
+		Password:      cred.EncryptedPassword,
+		OwnerID:       accountID,
+		VolumeSource:  fmt.Sprintf("/tmp/claudedb/volumes/%s/data", db.ID),
+		VolumeDest:    "/var/lib/postgresql/data",
 		Environment: map[string]string{
 			"POSTGRES_DB": db.PhysicalDBName,
 		},
@@ -552,7 +553,7 @@ func (s *ClaudeDBService) AssignVPC(ctx context.Context, accountID, databaseID, 
 	}
 
 	log.Printf("[VPC-ASSIGN] RDS instance %s migrated to VPC %s (bridge: %s, IP: %s)",
-			databaseID, newVPCID, bridgeName, privateIP)
+		databaseID, newVPCID, bridgeName, privateIP)
 
 	return nil
 }
@@ -766,15 +767,15 @@ func (s *ClaudeDBService) ModifyDatabase(ctx context.Context, id, accountID, new
 
 		image := "docker.io/library/postgres:15-alpine"
 		containerConfig := domain.ContainerConfig{
-			Name:         containerName,
-			Image:        image,
-    HostPort:     db.NodePort,  // ← 1000, 1001... allocated per instance
-    ContainerPort: 5432,              // ← always 5432 inside the container
-			User:         cred.RoleName,
-			Password:     cred.EncryptedPassword,
-			OwnerID:      accountID,
-			VolumeSource: fmt.Sprintf("/tmp/claudedb/volumes/%s/data", id),
-			VolumeDest:   "/var/lib/postgresql/data",
+			Name:          containerName,
+			Image:         image,
+			HostPort:      db.NodePort, // ← 1000, 1001... allocated per instance
+			ContainerPort: 5432,        // ← always 5432 inside the container
+			User:          cred.RoleName,
+			Password:      cred.EncryptedPassword,
+			OwnerID:       accountID,
+			VolumeSource:  fmt.Sprintf("/tmp/claudedb/volumes/%s/data", id),
+			VolumeDest:    "/var/lib/postgresql/data",
 			Environment: map[string]string{
 				"POSTGRES_DB": db.PhysicalDBName,
 			},
@@ -823,34 +824,23 @@ func (s *ClaudeDBService) RebootDatabase(ctx context.Context, id, accountID stri
 	// Start it back up
 	return s.StartDatabase(ctx, id, accountID)
 }
+
 // --- Scaling Policy Management ---
 
 func (s *ClaudeDBService) CreateScalingPolicy(ctx context.Context, tenantID string, policy domain.ScalingPolicyRequest) error {
-	if s.publisher == nil {
-		return fmt.Errorf("messaging publisher is not configured")
-	}
-	return s.publisher.PublishScalingPolicy(tenantID, policy)
+	return s.repo.CreateScalingPolicy(ctx, tenantID, policy)
 }
 
 func (s *ClaudeDBService) GetScalingPolicies(ctx context.Context, tenantID string) ([]domain.ScalingPolicy, error) {
-	if s.publisher == nil {
-		return nil, fmt.Errorf("messaging publisher is not configured")
-	}
-	return s.publisher.GetScalingPolicies(tenantID)
+	return s.repo.GetScalingPolicies(ctx, tenantID)
 }
 
 func (s *ClaudeDBService) UpdateScalingPolicy(ctx context.Context, tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error {
-	if s.publisher == nil {
-		return fmt.Errorf("messaging publisher is not configured")
-	}
-	return s.publisher.UpdateScalingPolicy(tenantID, policyID, req)
+	return s.repo.UpdateScalingPolicy(ctx, tenantID, policyID, req)
 }
 
 func (s *ClaudeDBService) DeleteScalingPolicy(ctx context.Context, tenantID, policyID string) error {
-	if s.publisher == nil {
-		return fmt.Errorf("messaging publisher is not configured")
-	}
-	return s.publisher.DeleteScalingPolicy(tenantID, policyID)
+	return s.repo.DeleteScalingPolicy(ctx, tenantID, policyID)
 }
 
 func (s *ClaudeDBService) isDuplicateNodeHostError(err error) bool {
@@ -859,6 +849,6 @@ func (s *ClaudeDBService) isDuplicateNodeHostError(err error) bool {
 	}
 	// Check for PostgreSQL unique constraint name or standard "duplicate key" error
 	errMsg := err.Error()
-	return (strings.Contains(errMsg, "unique_node_host_port") || 
+	return (strings.Contains(errMsg, "unique_node_host_port") ||
 		(strings.Contains(errMsg, "duplicate key") && strings.Contains(errMsg, "node_host")))
 }

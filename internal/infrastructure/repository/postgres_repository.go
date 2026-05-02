@@ -19,7 +19,7 @@ var (
 	ErrDuplicate = errors.New("duplicate record")
 )
 
-// PostgresRepository implements domain.RepositoryPort
+// PostgresRepository implements interfaces.RepositoryPort
 type PostgresRepository struct {
 	db *sql.DB
 }

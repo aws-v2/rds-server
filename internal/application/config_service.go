@@ -3,16 +3,17 @@ package application
 import (
 	"context"
 	"rds/internal/domain"
+	"rds/internal/interfaces"
 )
 
 // ConfigService handles configuration management
 type ConfigService struct {
-	repo         domain.RepositoryPort
+	repo         interfaces.RepositoryPort
 	auditService *AuditService
 }
 
 // NewConfigService creates a new configuration service
-func NewConfigService(repo domain.RepositoryPort, auditService *AuditService) *ConfigService {
+func NewConfigService(repo interfaces.RepositoryPort, auditService *AuditService) *ConfigService {
 	return &ConfigService{
 		repo:         repo,
 		auditService: auditService,
