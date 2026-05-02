@@ -177,8 +177,10 @@ func main() {
 
 	// 5. Initialize Docker adapter
 	logger.Log.Info("Initializing Docker adapter...")
-	dockerAdapter, err := docker.NewDockerAdapter()
-	if err != nil {
+	portAllocator := docker.NewPortAllocator()
+
+dockerAdapter, err := docker.NewDockerAdapter(portAllocator)
+if err != nil {
 		logger.Log.Fatal("Failed to create Docker adapter", zap.Error(err))
 	}
 
