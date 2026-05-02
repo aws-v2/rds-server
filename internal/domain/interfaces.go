@@ -27,6 +27,7 @@ type RepositoryPort interface {
 	GetDatabase(ctx context.Context, id string) (*Database, error)
 	GetDatabaseByIdempotencyKey(ctx context.Context, accountID, idempotencyKey string) (*Database, error)
 	ListDatabases(ctx context.Context, accountID string) ([]*Database, error)
+	GetNextNodePort(ctx context.Context) (int, error)
 	ListAllActiveDatabases(ctx context.Context) ([]*Database, error)
 	UpdateDatabaseStatus(ctx context.Context, id string, status DBStatus) error
 	UpdateDatabasePublicPort(ctx context.Context, id string, publicPort int) error
@@ -34,6 +35,17 @@ type RepositoryPort interface {
 	DeleteDatabase(ctx context.Context, id string) error
 	HardDeleteDatabase(ctx context.Context, id string) error
 	GetActiveCredential(ctx context.Context, databaseID string) (*Credential, error)
+
+	// VPC operations
+	CreateVPC(ctx context.Context, vpc *VPC) error
+	GetVPC(ctx context.Context, id string) (*VPC, error)
+	GetDefaultVPC(ctx context.Context, accountID string) (*VPC, error)
+	ListVPCs(ctx context.Context, accountID string) ([]*VPC, error)
+	DeleteVPC(ctx context.Context, id string) error
+	
+	// IP operations
+	ListAllocatedIPs(ctx context.Context, vpcID string) ([]string, error)
+
 	// Volume operations
 	CreateVolume(ctx context.Context, vol *Volume) error
 	GetVolume(ctx context.Context, id string) (*Volume, error)
@@ -53,7 +65,9 @@ type RepositoryPort interface {
 type ContainerConfig struct {
 	Name         string
 	Image        string
-	Port         int
+   HostPort      int    // externally bound port on the host (1000, 1001, ...)
+    ContainerPort int    // internal port inside the container (always 5432 for postgres)
+    // Remove or repurpose the old Port field
 	User         string
 	Password     string
 	OwnerID      string
@@ -93,7 +107,9 @@ type DockerPort interface {
 	GetContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error)
 	GetContainerStats(ctx context.Context, containerID string) (*ContainerStats, error)
 	UpdateContainerResources(ctx context.Context, containerID string, cpuShares int64, memoryBytes int64) error
-	EnsureNetwork(ctx context.Context, name string) error
+	EnsureNetwork(ctx context.Context, name, gateway string) error
+	InspectNetwork(ctx context.Context, name string) (map[string]interface{}, error)
+	RemoveNetwork(ctx context.Context, name string) error
 
 	// Docker Volume operations
 	CreateVolume(ctx context.Context, name string) error

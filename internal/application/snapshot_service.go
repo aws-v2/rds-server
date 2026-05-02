@@ -184,7 +184,8 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 	containerConfig := domain.ContainerConfig{
 		Name:         fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
 		Image:        image,
-		Port:         5432,
+	    HostPort:     dbEntity.NodePort,  // ← 1000, 1001... allocated per instance
+    ContainerPort: 5432,              // ← always 5432 inside the container
 		User:         roleName,
 		Password:     password,
 		OwnerID:      req.AccountID,

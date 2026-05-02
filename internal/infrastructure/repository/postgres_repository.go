@@ -210,6 +210,17 @@ func (r *PostgresRepository) GetNextAvailablePort(ctx context.Context) (int, err
 	return port, nil
 }
 
+// GetNextNodePort gets the next available public host port starting from 1000
+func (r *PostgresRepository) GetNextNodePort(ctx context.Context) (int, error) {
+	query := `SELECT COALESCE(MAX(node_port), 999) + 1 FROM databases WHERE node_port >= 1000`
+	var port int
+	err := r.db.QueryRowContext(ctx, query).Scan(&port)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get next node port: %w", err)
+	}
+	return port, nil
+}
+
 // CreateAuditLog creates a new audit log entry
 func (r *PostgresRepository) CreateAuditLog(ctx context.Context, log *domain.AuditLog) error {
 	// Generate UUID if not provided
@@ -436,4 +447,152 @@ func (r *PostgresRepository) GetConfigHistory(ctx context.Context, instanceID st
 	}
 
 	return history, nil
+}
+
+// CreateVPC inserts a new VPC into the database
+func (r *PostgresRepository) CreateVPC(ctx context.Context, vpc *domain.VPC) error {
+	if vpc.ID == "" {
+		vpc.ID = uuid.New().String()
+	}
+
+	query := `
+		INSERT INTO vpcs (id, name, cidr_block, bridge_name, subnet, gateway, tenant_id, status, is_default, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+
+	_, err := r.db.ExecContext(ctx, query,
+		vpc.ID, vpc.Name, vpc.CIDRBlock, vpc.BridgeName, vpc.Subnet, vpc.Gateway,
+		vpc.TenantID, vpc.Status, vpc.IsDefault, vpc.CreatedAt, vpc.UpdatedAt,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to create VPC: %w", err)
+	}
+
+	return nil
+}
+
+// GetVPC retrieves a VPC by ID
+func (r *PostgresRepository) GetVPC(ctx context.Context, id string) (*domain.VPC, error) {
+	query := `
+		SELECT id, name, cidr_block, bridge_name, subnet, gateway, tenant_id, status, is_default, created_at, updated_at
+		FROM vpcs
+		WHERE id = $1
+	`
+
+	vpc := &domain.VPC{}
+	err := r.db.QueryRowContext(ctx, query, id).Scan(
+		&vpc.ID, &vpc.Name, &vpc.CIDRBlock, &vpc.BridgeName, &vpc.Subnet, &vpc.Gateway,
+		&vpc.TenantID, &vpc.Status, &vpc.IsDefault, &vpc.CreatedAt, &vpc.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VPC: %w", err)
+	}
+
+	return vpc, nil
+}
+
+// GetDefaultVPC retrieves the default VPC for a tenant
+func (r *PostgresRepository) GetDefaultVPC(ctx context.Context, accountID string) (*domain.VPC, error) {
+	query := `
+		SELECT id, name, cidr_block, bridge_name, subnet, gateway, tenant_id, status, is_default, created_at, updated_at
+		FROM vpcs
+		WHERE tenant_id = $1 AND is_default = true
+		LIMIT 1
+	`
+
+	vpc := &domain.VPC{}
+	err := r.db.QueryRowContext(ctx, query, accountID).Scan(
+		&vpc.ID, &vpc.Name, &vpc.CIDRBlock, &vpc.BridgeName, &vpc.Subnet, &vpc.Gateway,
+		&vpc.TenantID, &vpc.Status, &vpc.IsDefault, &vpc.CreatedAt, &vpc.UpdatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default VPC: %w", err)
+	}
+
+	return vpc, nil
+}
+
+// ListVPCs retrieves all VPCs for a specific tenant
+func (r *PostgresRepository) ListVPCs(ctx context.Context, accountID string) ([]*domain.VPC, error) {
+	query := `
+		SELECT id, name, cidr_block, bridge_name, subnet, gateway, tenant_id, status, is_default, created_at, updated_at
+		FROM vpcs
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list VPCs: %w", err)
+	}
+	defer rows.Close()
+
+	var vpcs []*domain.VPC
+	for rows.Next() {
+		vpc := &domain.VPC{}
+		err := rows.Scan(
+			&vpc.ID, &vpc.Name, &vpc.CIDRBlock, &vpc.BridgeName, &vpc.Subnet, &vpc.Gateway,
+			&vpc.TenantID, &vpc.Status, &vpc.IsDefault, &vpc.CreatedAt, &vpc.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan VPC: %w", err)
+		}
+		vpcs = append(vpcs, vpc)
+	}
+
+	return vpcs, nil
+}
+
+// DeleteVPC deletes a VPC by ID
+func (r *PostgresRepository) DeleteVPC(ctx context.Context, id string) error {
+	query := `DELETE FROM vpcs WHERE id = $1`
+
+	result, err := r.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete VPC: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check delete result: %w", err)
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// ListAllocatedIPs gets all IPs currently assigned to databases in a VPC
+func (r *PostgresRepository) ListAllocatedIPs(ctx context.Context, vpcID string) ([]string, error) {
+	query := `
+		SELECT private_ip FROM databases
+		WHERE vpc_id = $1 AND private_ip IS NOT NULL AND status != 'DELETED'
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, vpcID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list allocated IPs: %w", err)
+	}
+	defer rows.Close()
+
+	var ips []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			return nil, fmt.Errorf("failed to scan IP: %w", err)
+		}
+		ips = append(ips, ip)
+	}
+
+	return ips, nil
 }

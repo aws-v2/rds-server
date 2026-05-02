@@ -54,7 +54,8 @@ func (s *InstanceService) CreateInstance(ctx context.Context, req CreateInstance
 	containerConfig := domain.ContainerConfig{
 		Name:     req.Name,
 		Image:    image,
-		Port:     port,
+	    HostPort:     port,  // ← 1000, 1001... allocated per instance
+    ContainerPort: 5432,              // ← always 5432 inside the container
 		User:     req.User,
 		Password: req.Password,
 		OwnerID:  req.OwnerID,

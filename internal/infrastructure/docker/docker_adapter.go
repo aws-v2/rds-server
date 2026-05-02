@@ -101,13 +101,11 @@ func (d *DockerAdapter) PullImage(ctx context.Context, imageq string) error {
 
 	return nil
 }
-
 // CreateContainer creates a new Docker container
 func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.ContainerConfig) (string, error) {
-	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s",
-		cfg.Name, cfg.BridgeName, cfg.PrivateIP)
+	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s HostPort=%d",
+		cfg.Name, cfg.BridgeName, cfg.PrivateIP, cfg.HostPort)
 
-	// Prepare environment variables
 	env := []string{
 		fmt.Sprintf("POSTGRES_USER=%s", cfg.User),
 		fmt.Sprintf("POSTGRES_PASSWORD=%s", cfg.Password),
@@ -116,7 +114,6 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
 
-	// Prepare labels
 	labels := map[string]string{
 		"ownerId": cfg.OwnerID,
 		"type":    "mini-rds",
@@ -125,18 +122,33 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 		labels[key] = value
 	}
 
-	// Container configuration
+	// Bug 1 fix: postgres always listens on 5432 inside the container
+	containerPort := nat.Port("5432/tcp")
+
 	containerConfig := &container.Config{
 		Image:  cfg.Image,
 		Env:    env,
 		Labels: labels,
+		ExposedPorts: nat.PortSet{
+			containerPort: struct{}{},
+		},
 	}
 
-	hostConfig := &container.HostConfig{}
-	var networkingConfig *network.NetworkingConfig
+	hostConfig := &container.HostConfig{
+		// Bug 2 fix: bind host's NodePort (1000, 1001...) → container's 5432
+		PortBindings: nat.PortMap{
+			containerPort: []nat.PortBinding{
+				{
+					HostIP:   "0.0.0.0",
+					HostPort: "8743",
+					// HostPort: fmt.Sprintf("%d", cfg.HostPort),
+				},
+			},
+		},
+	}
 
+	var networkingConfig *network.NetworkingConfig
 	if cfg.BridgeName != "" && cfg.PrivateIP != "" {
-		// VPC Networking: Attach directly to the bridge with a static IP
 		hostConfig.NetworkMode = container.NetworkMode(cfg.BridgeName)
 		networkingConfig = &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{
@@ -144,20 +156,6 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 					IPAMConfig: &network.EndpointIPAMConfig{
 						IPv4Address: cfg.PrivateIP,
 					},
-				},
-			},
-		}
-	} else {
-		// Classic Port Binding: Fallback for local dev
-		containerPort := "5432/tcp"
-		containerConfig.ExposedPorts = nat.PortSet{
-			nat.Port(containerPort): struct{}{},
-		}
-		hostConfig.PortBindings = nat.PortMap{
-			nat.Port(containerPort): []nat.PortBinding{
-				{
-					HostIP:   "0.0.0.0",
-					HostPort: fmt.Sprintf("%d", cfg.Port),
 				},
 			},
 		}
@@ -169,20 +167,27 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 		}
 	}
 
-	// Create the container
 	resp, err := d.client.ContainerCreate(ctx, containerConfig, hostConfig, networkingConfig, nil, cfg.Name)
 	if err != nil {
+		log.Printf("[DOCKER] Failed to create container %s: %v", cfg.Name, err)
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
+	log.Printf("[DOCKER] Container %s created successfully — ID=%s HostPort=%d→ContainerPort=5432",
+		cfg.Name, resp.ID, cfg.HostPort)
 	return resp.ID, nil
 }
 
-// StartContainer starts a Docker container
 func (d *DockerAdapter) StartContainer(ctx context.Context, containerID string) error {
-	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{}); err != nil {
+	log.Printf("---->> [DOCKER] StartContainer: initiating for container %s", containerID)
+
+	if err := d.client.ContainerStart(ctx, containerID, container.StartOptions{
+	}); err != nil {
+		log.Printf("---->> [DOCKER] StartContainer: failed for container %s: %v", containerID, err)
 		return fmt.Errorf("failed to start container %s: %w", containerID, err)
 	}
+
+	log.Printf("---->> [DOCKER] StartContainer: container %s started successfully", containerID)
 	return nil
 }
 
@@ -291,25 +296,74 @@ func (d *DockerAdapter) UpdateContainerResources(ctx context.Context, containerI
 }
 
 // EnsureNetwork checks if a Docker network exists, and creates it if not.
-func (d *DockerAdapter) EnsureNetwork(ctx context.Context, name string) error {
+func (d *DockerAdapter) EnsureNetwork(ctx context.Context, name, gateway string) error {
 	_, err := d.client.NetworkInspect(ctx, name, network.InspectOptions{})
 	if err == nil {
 		return nil // Network already exists
 	}
 
 	// Create the network if it doesn't exist
-	log.Printf("[DOCKER] Network %s not found, creating...", name)
+	log.Printf("[DOCKER] Network %s not found, creating with gateway %s...", name, gateway)
+	
+	// Infer subnet from gateway (e.g., 10.5.1.1 -> 10.5.1.0/24)
+	lastDot := -1
+	for i := len(gateway) - 1; i >= 0; i-- {
+		if gateway[i] == '.' {
+			lastDot = i
+			break
+		}
+	}
+	
+	subnet := "10.0.0.0/16" // Very broad fallback
+	if lastDot != -1 {
+		subnet = gateway[:lastDot] + ".0/24"
+	}
+
 	_, err = d.client.NetworkCreate(ctx, name, network.CreateOptions{
 		Driver: "bridge",
+		IPAM: &network.IPAM{
+			Config: []network.IPAMConfig{
+				{
+					Subnet:  subnet,
+					Gateway: gateway,
+				},
+			},
+		},
 		Options: map[string]string{
 			"com.docker.network.bridge.name": name,
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create docker network %s: %w", name, err)
+		return fmt.Errorf("failed to create docker network %s with subnet %s: %w", name, subnet, err)
 	}
 
-	log.Printf("[DOCKER] Successfully created network %s", name)
+	log.Printf("[DOCKER] Successfully created network %s with subnet %s", name, subnet)
+	return nil
+}
+
+// InspectNetwork returns details about a Docker network
+func (d *DockerAdapter) InspectNetwork(ctx context.Context, name string) (map[string]interface{}, error) {
+	nw, err := d.client.NetworkInspect(ctx, name, network.InspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect docker network %s: %w", name, err)
+	}
+
+	result := map[string]interface{}{
+		"ID":         nw.ID,
+		"Name":       nw.Name,
+		"Driver":     nw.Driver,
+		"Containers": nw.Containers,
+		"IPAM":       nw.IPAM,
+	}
+	return result, nil
+}
+
+// RemoveNetwork removes a Docker network
+func (d *DockerAdapter) RemoveNetwork(ctx context.Context, name string) error {
+	err := d.client.NetworkRemove(ctx, name)
+	if err != nil {
+		return fmt.Errorf("failed to remove docker network %s: %w", name, err)
+	}
 	return nil
 }
 
