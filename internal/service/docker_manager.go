@@ -154,7 +154,6 @@ func (m *DockerManager) CreatePostgres(ctx context.Context, name, user, pass, ow
 		},
 	}
 
-	// Create container
 	resp, err := m.client.ContainerCreate(ctx, config, hostConfig, nil, nil, name)
 	if err != nil {
 		m.usedPorts[hostPort] = false
