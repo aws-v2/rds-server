@@ -143,7 +143,6 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 	// hostPort=9009
 
 
-	log.Printf("[DOCKER]--------------------- Allocated host port %d for container %s", hostPort, cfg.Name)
 
 	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s HostPort=%d",
 		cfg.Name, cfg.BridgeName, cfg.PrivateIP, hostPort)
