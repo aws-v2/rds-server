@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"rds/internal/utils"
 
 	"github.com/google/uuid"
@@ -11,12 +12,12 @@ import (
 
 // VolumeService manages RDS storage volumes
 type VolumeService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	region       string
 }
 
-func NewVolumeService(repo domain.RepositoryPort, dockerClient domain.DockerPort, region string) *VolumeService {
+func NewVolumeService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort, region string) *VolumeService {
 	return &VolumeService{
 		repo:         repo,
 		dockerClient: dockerClient,

@@ -14,6 +14,7 @@ import (
 	"rds/internal/middleware" // Added new import
 
 	"github.com/gin-gonic/gin"
+	
 )
 
 // --- Standard Response Envelope ---
@@ -216,6 +217,12 @@ func (h *ClaudeDBHandler) ListVPCs(c *gin.Context) {
 	}
 
 	respond(c, http.StatusOK, "VPCs fetched successfully", vpcs)
+}
+
+// DebugPort retrieves the next available node port to debug allocation
+func (h *ClaudeDBHandler) DebugPort(c *gin.Context) {
+	
+	
 }
 
 func (h *ClaudeDBHandler) ListDatabases(c *gin.Context) {

@@ -4,18 +4,18 @@ import (
 	"context"
 	"log"
 	"math/rand"
-	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"time"
 )
 
 // WorkerService encapsulates background polling tasks
 type WorkerService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	stopChan     chan struct{}
 }
 
-func NewWorkerService(repo domain.RepositoryPort, dockerClient domain.DockerPort) *WorkerService {
+func NewWorkerService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort) *WorkerService {
 	return &WorkerService{
 		repo:         repo,
 		dockerClient: dockerClient,

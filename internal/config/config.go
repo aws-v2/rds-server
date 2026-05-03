@@ -65,7 +65,6 @@ type EurekaConfig struct {
 func Load() (*Config, error) {
 	profile := getEnv("APP_PROFILE", "dev")
 
-	// Try loading profile-specific env file first, then fallback to .env
 	_ = godotenv.Load(".env-" + profile)
 	_ = godotenv.Load()
 

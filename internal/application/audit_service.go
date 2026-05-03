@@ -3,15 +3,16 @@ package application
 import (
 	"context"
 	"rds/internal/domain"
+	"rds/internal/interfaces"
 )
 
 // AuditService handles audit logging operations
 type AuditService struct {
-	repo domain.RepositoryPort
+	repo interfaces.RepositoryPort
 }
 
 // NewAuditService creates a new audit service
-func NewAuditService(repo domain.RepositoryPort) *AuditService {
+func NewAuditService(repo interfaces.RepositoryPort) *AuditService {
 	return &AuditService{
 		repo: repo,
 	}

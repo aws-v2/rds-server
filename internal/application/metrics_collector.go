@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"rds/internal/messaging"
 	"time"
 )
@@ -24,8 +24,8 @@ type RDSIngestRequest struct {
 }
 
 type MetricsCollector struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 	publisher    messaging.Publisher
 	metricsURL   string
 	metricsToken string
@@ -33,7 +33,7 @@ type MetricsCollector struct {
 	stopChan     chan struct{}
 }
 
-func NewMetricsCollector(repo domain.RepositoryPort, dockerClient domain.DockerPort, publisher messaging.Publisher, metricsURL, metricsToken string) *MetricsCollector {
+func NewMetricsCollector(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort, publisher messaging.Publisher, metricsURL, metricsToken string) *MetricsCollector {
 	return &MetricsCollector{
 		repo:         repo,
 		dockerClient: dockerClient,
@@ -106,7 +106,7 @@ func (c *MetricsCollector) collectAndSend() {
 			MemUsedMB:      stats.MemoryUsageBytes / (1024 * 1024),
 			MemPercent:     memPercent,
 			StorageUsedGB:  0, // Future: could get from du inside container
-			StorageTotalGB: 0, 
+			StorageTotalGB: 0,
 			Connections:    0, // Future: could get from pg_stat_activity
 			IOPS:           0,
 		}
@@ -131,7 +131,7 @@ func (c *MetricsCollector) sendToServer(payload RDSIngestRequest, token string) 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	// Use the dynamic token if provided, otherwise fallback to static token
 	authToken := token
 	if authToken == "" {

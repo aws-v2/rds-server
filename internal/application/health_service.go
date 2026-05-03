@@ -2,7 +2,7 @@ package application
 
 import (
 	"context"
-	"rds/internal/domain"
+	"rds/internal/interfaces"
 	"time"
 )
 
@@ -24,12 +24,12 @@ type ServiceHealth struct {
 
 // HealthService handles health checks
 type HealthService struct {
-	repo         domain.RepositoryPort
-	dockerClient domain.DockerPort
+	repo         interfaces.RepositoryPort
+	dockerClient interfaces.DockerPort
 }
 
 // NewHealthService creates a new health service
-func NewHealthService(repo domain.RepositoryPort, dockerClient domain.DockerPort) *HealthService {
+func NewHealthService(repo interfaces.RepositoryPort, dockerClient interfaces.DockerPort) *HealthService {
 	return &HealthService{
 		repo:         repo,
 		dockerClient: dockerClient,

@@ -8,6 +8,8 @@ type VPC struct {
 	Name       string    `json:"name"`
 	CIDRBlock  string    `json:"cidr_block"`
 	BridgeName string    `json:"bridge_name"`
+	Subnet     string    `json:"subnet"`
+	Gateway    string    `json:"gateway"`
 	TenantID   string    `json:"tenant_id"`
 	Status     string    `json:"status"`
 	IsDefault  bool      `json:"is_default"`
