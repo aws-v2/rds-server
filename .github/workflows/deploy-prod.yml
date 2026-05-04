@@ -80,12 +80,12 @@ jobs:
             docker service create \
               --name rds-server-prod \
               --network aws-prod-network \
-              --publish published=8805,target=8805 \
+              --publish published=8087,target=8087 \
               --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
               --env APP_PROFILE=STAGING \
               --env EUREKA_HOSTNAME=rds-server-prod \
               --env EUREKA_IP_ADDR=127.0.0.1 \
-              --env RDS_PORT=8805 \
+              --env RDS_PORT=8087 \
               --env DB_HOST=postgres-prod \
               --env DB_PORT=5432 \
               --env DB_USER=postgres-prod-user \
