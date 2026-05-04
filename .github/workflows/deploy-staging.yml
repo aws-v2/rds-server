@@ -78,11 +78,11 @@ jobs:
             docker run -d --name rds-server-staging \
               --network aws-staging-network \
               -v /var/run/docker.sock:/var/run/docker.sock \
-              -p 8805:8805 \
+              -p 8087:8087 \
               -e APP_PROFILE=STAGING \
               -e EUREKA_HOSTNAME=rds-server-staging \
               -e EUREKA_IP_ADDR=127.0.0.1 \
-              -e RDS_PORT=8805 \
+              -e RDS_PORT=8087 \
               -e DB_HOST=postgres-staging \
               -e DB_PORT=5432 \
               -e DB_USER=postgres-staging-user \
