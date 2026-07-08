@@ -23,13 +23,16 @@ type Publisher interface {
 	GetScalingPolicies(tenantID string) ([]domain.ScalingPolicy, error)
 	UpdateScalingPolicy(tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
 	DeleteScalingPolicy(tenantID, policyID string) error
+
+	// ProvisionRDSInstance dispatches a VM provisioning request to the EC2 service.
+	ProvisionRDSInstance(event ProvisionInstanceEvent) error
 }
 
 // NATSPublisher implements the Publisher interface using NATS Request-Response pattern.
 type NATSPublisher struct {
 	nc     *nats.Conn
 	prefix string
-}	
+}
 
 type exposeRDSRequest struct {
 	CorrelationID string `json:"correlation_id"`
@@ -101,12 +104,12 @@ func NewNATSPublisher(url, user, password, prefix string) (*NATSPublisher, error
 	opts := []nats.Option{
 		nats.UserInfo(user, password),
 	}
- 
+
 	nc, err := nats.Connect(url, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
- 
+
 	return &NATSPublisher{nc: nc, prefix: prefix}, nil
 }
 
@@ -276,20 +279,20 @@ func (p *NATSPublisher) ReconcileVPCs() error {
 func (p *NATSPublisher) RequestInstanceToken(userID, instanceID string) (string, error) {
 	correlationID := uuid.New().String()
 	subject := fmt.Sprintf("%s.iam.token.generate", p.prefix)
- 
+
 	req := instanceTokenRequest{
 		InstanceID: instanceID,
 		UserID:     userID,
 	}
- 
+
 	data, err := json.Marshal(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal instance token request: %w", err)
 	}
- 
+
 	log.Printf("[RDS-NATS] [REQUEST] subject=%s correlation_id=%s user_id=%s instance_id=%s",
 		subject, correlationID, userID, instanceID)
- 
+
 	msg, err := p.nc.Request(subject, data, 5*time.Second)
 	if err != nil {
 		log.Printf("[RDS-NATS] [ERROR] RequestInstanceToken failed: correlation_id=%s error=%v", correlationID, err)
@@ -412,6 +415,44 @@ func (p *NATSPublisher) UpdateScalingPolicy(tenantID, policyID string, req domai
 	return nil
 }
 
+// ProvisionInstanceEvent is the payload sent to the EC2 service to provision a new VM.
+// When Profile is "rds", the EC2 service will boot a VM pre-loaded with PostgreSQL
+// and inject the Manifest data via cloud-init.
+type ProvisionInstanceEvent struct {
+	Profile    string                 `json:"profile"`
+	Specs      map[string]int         `json:"specs"`
+	UserID     string                 `json:"user_id"`
+	ResourceID    string            `json:"resource_id"`
+	StorageARN string                 `json:"storage_arn"`
+	Manifest   map[string]interface{} `json:"manifest"`
+	SessionID  string                 `json:"session_id"`
+}
+
+// ProvisionRDSInstance publishes a VM provisioning event to the EC2 service.
+// This is a fire-and-forget publish: the EC2 service handles scheduling,
+// host selection, and cloud-init injection. The SessionID (= database ID) is
+// used to correlate the async callback when the VM becomes ready.
+func (p *NATSPublisher) ProvisionRDSInstance(event ProvisionInstanceEvent) error {
+	correlationID := uuid.New().String()
+	subject := fmt.Sprintf("%s.ec2.task.provision",p.prefix)
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ProvisionInstanceEvent: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] [PROVISION] subject=%s correlation_id=%s session_id=%s profile=%s user_id=%s",
+		subject, correlationID, event.SessionID, event.Profile, event.UserID)
+
+	if err := p.nc.Publish(subject, data); err != nil {
+		log.Printf("[RDS-NATS] [ERROR] ProvisionRDSInstance failed: correlation_id=%s error=%v", correlationID, err)
+		return fmt.Errorf("failed to publish ProvisionInstanceEvent: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] [SUCCESS] ProvisionRDSInstance published: correlation_id=%s resource=%s", correlationID, event.ResourceID)
+	return nil
+}
+
 // DeleteScalingPolicy publishes a delete event for a scaling policy.
 func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 	correlationID := uuid.New().String()
@@ -439,4 +480,3 @@ func (p *NATSPublisher) DeleteScalingPolicy(tenantID, policyID string) error {
 	log.Printf("[RDS-NATS] [SUCCESS] Published delete policy event: correlation_id=%s policy_id=%s", correlationID, policyID)
 	return nil
 }
-

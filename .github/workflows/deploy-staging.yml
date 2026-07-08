@@ -87,7 +87,7 @@ jobs:
               -e DB_PORT=5432 \
               -e DB_USER=postgres-staging-user \
               -e DB_PASSWORD=postgres-staging-password \
-              -e DB_NAME=rds_db \
+              -e DB_NAME=rds_db2 \
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USERNAME=nats-staging-user \
               -e NATS_PASSWORD=nats-staging-password \

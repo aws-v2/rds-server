@@ -20,10 +20,10 @@ import (
 
 // DockerAdapter implements interfaces.DockerPort
 type DockerAdapter struct {
-	client *client.Client
-			mu   sync.Mutex
-			portAllocator *PortAllocator
-	next int
+	client        *client.Client
+	mu            sync.Mutex
+	portAllocator *PortAllocator
+	next          int
 }
 
 // NewDockerAdapter creates a new Docker adapter
@@ -34,10 +34,11 @@ func NewDockerAdapter(allocator *PortAllocator) (*DockerAdapter, error) {
 	}
 
 	return &DockerAdapter{
-		client:    cli,
+		client:        cli,
 		portAllocator: allocator,
 	}, nil
 }
+
 // GetContainerStats fetch stats from docker and calculate CPU/Memory
 func (d *DockerAdapter) GetContainerStats(ctx context.Context, containerID string) (*domain.ContainerStats, error) {
 	stats, err := d.client.ContainerStats(ctx, containerID, false)
@@ -107,42 +108,17 @@ func (d *DockerAdapter) PullImage(ctx context.Context, imageq string) error {
 	return nil
 }
 
- 
-// func (d *DockerAdapter) Acquire() (int, error) {
-// const startPort = 21000
-
-// 	 fmt.Errorf("==============>starting free ports available in range %d-65535", startPort)
-
-// 	d.mu.Lock()
-// 	defer d.mu.Unlock()
-
-// 	for port := d.next; port < 65535; port++ {
-// 		if isPortFree(port) {
-// 			d.next = port + 1 // next call starts after this one
-// 	 fmt.Errorf("==============> free %d", port)
-			
-// 			return port, nil
-
-// 		}
-// 	}
-// 	return 0, fmt.Errorf("no free ports available in range %d-65535", startPort)
-// }
-
-
-
 // CreateContainer creates a new Docker container
 func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.ContainerConfig) (string, error) {
 	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s HostPort=%d",
 		cfg.Name, cfg.BridgeName, cfg.PrivateIP, cfg.HostPort)
 
-// Dynamically pick a free host port starting from 21000
+	// Dynamically pick a free host port starting from 21000
 	hostPort, err := d.portAllocator.Acquire()
 	if err != nil {
 		return "", fmt.Errorf("port allocation failed: %w", err)
 	}
 	// hostPort=9009
-
-
 
 	log.Printf("[DOCKER] Creating container %s — BridgeName=%s PrivateIP=%s HostPort=%d",
 		cfg.Name, cfg.BridgeName, cfg.PrivateIP, hostPort)
@@ -174,8 +150,6 @@ func (d *DockerAdapter) CreateContainer(ctx context.Context, cfg domain.Containe
 			containerPort: struct{}{},
 		},
 	}
-
-
 
 	hostConfig := &container.HostConfig{
 		// Bug 2 fix: bind host's NodePort (1000, 1001...) → container's 5432

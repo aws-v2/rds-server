@@ -1,3 +1,5 @@
+-- migration 01: Add ssh_private_key column to hosts table
+
 -- Drop indexes
 DROP INDEX IF EXISTS idx_instances_created_at;
 DROP INDEX IF EXISTS idx_instances_status;

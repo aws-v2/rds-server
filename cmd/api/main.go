@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"net/url"
+	// "os"
 	"rds/internal/application"
 	"rds/internal/config"
 	"rds/internal/discovery"
@@ -154,7 +155,7 @@ func main() {
 
 	if err != nil {
 		logger.Log.Warn("Could not connect to PostgreSQL after retries, falling back to SQLite")
-		sqlitePath := "lambda.db"
+		sqlitePath := "rds.db"
 		db, err = database.NewSQLiteDB(sqlitePath)
 		if err != nil {
 			logger.Log.Fatal("Failed to connect to SQLite fallback", zap.Error(err))
@@ -164,6 +165,32 @@ func main() {
 		logger.Log.Info("Successfully connected to PostgreSQL")
 	}
 	defer db.Close()
+
+
+
+	// slog.Info("Initializing PostgreSQL repository...")
+	// db1, err := database.NewPostgresDB(dbConfig)
+	// if err != nil {
+	// 	logger.Log.Error("Failed to connect to database", "error", err)
+	// 	os.Exit(1)
+	// }
+	// defer db.Close()
+
+	// if err := database.MigrateDir(db, cfg.MigrationsDir); err != nil {
+	// 	logger.Log.Error("Failed to migrate database", zap.Error( err))
+	// 	os.Exit(1)
+	// }
+	// logger.Log.Info("Database migration completed successfully")
+
+
+
+
+// slog.Info("Running database migrations...", "migrations_dir", cfg.MigrationsDir)
+// 	if err := database.MigrateDir(db, cfg.MigrationsDir); err != nil {
+// 		slog.Error("Failed to migrate database", "error", err)
+// 		os.Exit(1)
+// 	}
+// 	slog.Info("Database migration completed successfully")
 
 	// 3. Run migrations
 	logger.Log.Info("Running database migrations...")
@@ -179,8 +206,8 @@ func main() {
 	logger.Log.Info("Initializing Docker adapter...")
 	portAllocator := docker.NewPortAllocator()
 
-dockerAdapter, err := docker.NewDockerAdapter(portAllocator)
-if err != nil {
+	dockerAdapter, err := docker.NewDockerAdapter(portAllocator)
+	if err != nil {
 		logger.Log.Fatal("Failed to create Docker adapter", zap.Error(err))
 	}
 
@@ -189,10 +216,24 @@ if err != nil {
 	auditService := application.NewAuditService(repo)
 	healthService := application.NewHealthService(repo, dockerAdapter)
 	configService := application.NewConfigService(repo, auditService)
-	claudeDBService := application.NewClaudeDBService(repo, dockerAdapter, natsPublisher, cfg.Server.Region, cfg.Server.PublicHostIP)
+	claudeDBService := application.NewClaudeDBService(repo, natsPublisher, cfg.Server.Region, cfg.Server.PublicHostIP,cfg.NATS.Prefix)
 	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
 	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
 	docsService := application.NewDocsService("docs")
+
+
+	if cfg.NATS.URL != "" {
+		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.Prefix,claudeDBService)
+		if err != nil {
+			logger.Log.Warn("Failed to initialize NATS subscriber", zap.Error(err))
+		} else {
+			if err := natsSubscriber.Start(); err != nil {
+				logger.Log.Warn("Failed to start NATS subscriber", zap.Error(err))
+			} else {
+				defer natsSubscriber.Close()
+			}
+		}
+	}
 
 	workerService := application.NewWorkerService(repo, dockerAdapter)
 	workerService.Start()

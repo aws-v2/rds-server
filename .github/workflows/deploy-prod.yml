@@ -90,7 +90,7 @@ jobs:
               --env DB_PORT=5432 \
               --env DB_USER=postgres-prod-user \
               --env DB_PASSWORD=postgres-prod-password \
-              --env DB_NAME=rds_db \
+              --env DB_NAME=rds_db2 \
               --env NATS_URL=nats://nats-prod:4222 \
               --env NATS_USERNAME=nats-prod-user \
               --env NATS_PASSWORD=nats-prod-password \

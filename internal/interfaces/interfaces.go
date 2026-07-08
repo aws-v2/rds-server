@@ -1,10 +1,9 @@
 package interfaces
 
-
 import (
 	"context"
-	"rds/internal/domain")
-
+	"rds/internal/domain"
+)
 
 // RepositoryPort defines the interface for database operations
 type RepositoryPort interface {
@@ -40,9 +39,9 @@ type RepositoryPort interface {
 	HardDeleteDatabase(ctx context.Context, id string) error
 	GetActiveCredential(ctx context.Context, databaseID string) (*domain.Credential, error)
 	CreateScalingPolicy(ctx context.Context, tenantID string, policy domain.ScalingPolicyRequest) error
-    GetScalingPolicies(ctx context.Context, tenantID string) ([]domain.ScalingPolicy, error)
-    UpdateScalingPolicy(ctx context.Context, tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
-    DeleteScalingPolicy(ctx context.Context, tenantID, policyID string) error
+	GetScalingPolicies(ctx context.Context, tenantID string) ([]domain.ScalingPolicy, error)
+	UpdateScalingPolicy(ctx context.Context, tenantID, policyID string, req domain.UpdateScalingPolicyRequest) error
+	DeleteScalingPolicy(ctx context.Context, tenantID, policyID string) error
 
 	// VPC operations
 	CreateVPC(ctx context.Context, vpc *domain.VPC) error
@@ -50,7 +49,7 @@ type RepositoryPort interface {
 	GetDefaultVPC(ctx context.Context, accountID string) (*domain.VPC, error)
 	ListVPCs(ctx context.Context, accountID string) ([]*domain.VPC, error)
 	DeleteVPC(ctx context.Context, id string) error
-	
+
 	// IP operations
 	ListAllocatedIPs(ctx context.Context, vpcID string) ([]string, error)
 
@@ -68,7 +67,6 @@ type RepositoryPort interface {
 	UpdateSnapshotStatus(ctx context.Context, id string, status domain.SnapshotStatus) error
 	DeleteSnapshot(ctx context.Context, id string) error
 }
-
 
 // DockerPort defines the interface for Docker operations
 type DockerPort interface {
