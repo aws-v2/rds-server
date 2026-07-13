@@ -50,7 +50,8 @@ jobs:
       with:
         context: .
         push: true
-        tags: qarani/rds-server:staging-${{github.sha}}
+        tags: |
+              qarani/rds-server:staging-${{github.sha}}
               qarani/rds-server:staging
 
   staging-deploy:
