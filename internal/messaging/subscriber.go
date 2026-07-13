@@ -119,7 +119,7 @@ func (s *NATSSubscriber) Start() error {
 		return fmt.Errorf("failed to subscribe to %s: %w", provisionSubject, err)
 	}
 
-	log.Printf("[NATS-SUB] Successfully subscribed to %s and %s", provisionSubject)
+	log.Printf("[NATS-SUB] Successfully subscribed to %s", provisionSubject)
 	return nil
 }
 

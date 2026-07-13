@@ -1,45 +1,33 @@
 package middleware
 
 import (
-	"net/http"
-	"strings"
+	"context"
+	"log"
 
 	"github.com/gin-gonic/gin"
 )
 
-// APIKeyAuthMiddleware creates a middleware that validates API keys
-func APIKeyAuthMiddleware(validator APIKeyValidator) gin.HandlerFunc {
+func AuthContextMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		apiKey := c.GetHeader("x-api-key")
-		if apiKey == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing x-api-key header"})
-			c.Abort()
-			return
-		}
 
-		// Split key "ID:SECRET"
-		parts := strings.SplitN(apiKey, ":", 2)
-		if len(parts) != 2 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key format. Expected accessKeyId:secretAccessKey"})
-			c.Abort()
-			return
-		}
+		userID := c.GetHeader("X-User-Id")
+		role := c.GetHeader("X-User-Role")
+		authMethod := c.GetHeader("X-Auth-Method")
 
-		accessKeyID := parts[0]
-		secretAccessKey := parts[1]
-
-		// Validate key using the validator
-		userID, err := validator.ValidateKey(accessKeyID, secretAccessKey)
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-			c.Abort()
-			return
-		}
-
-		// Store userId in context
+		// Store into Gin context
 		c.Set("userId", userID)
+		c.Set("role", role)
+		c.Set("authMethod", authMethod)
 
-		// Continue to next handler
+		// Propagate to Request context so services can access them
+		ctx := c.Request.Context()
+		ctx = context.WithValue(ctx, "userId", userID)
+		ctx = context.WithValue(ctx, "role", role)
+		ctx = context.WithValue(ctx, "authMethod", authMethod)
+		c.Request = c.Request.WithContext(ctx)
+
+		log.Printf("the user id is: %s", userID)
+
 		c.Next()
 	}
 }

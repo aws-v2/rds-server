@@ -50,7 +50,8 @@ jobs:
       with:
         context: .
         push: true
-        tags: qarani/rds-server:staging
+        tags: qarani/rds-server:staging-${{github.sha}}
+              qarani/rds-server:staging
 
   staging-deploy:
     needs: staging-build-image
@@ -72,7 +73,7 @@ jobs:
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
             docker network create aws-staging-network || true
-            docker pull qarani/rds-server:staging
+            docker pull qarani/rds-server:staging-${{github.sha}}
             docker stop rds-server-staging || true
             docker rm rds-server-staging || true
             docker run -d --name rds-server-staging \
@@ -94,7 +95,7 @@ jobs:
               -e EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka \
               -e PUBLIC_HOST_IP=192.168.1.7 \
               -e AWS_REGION=eu-north-1 \
-              qarani/rds-server:staging
+              qarani/rds-server:staging-${{github.sha}}
 
   staging-open-pr-to-main:
     needs: staging-deploy

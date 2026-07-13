@@ -13,43 +13,65 @@ type DocsHandler struct {
 func NewDocsHandler(service *application.DocsService) *DocsHandler {
 	return &DocsHandler{service: service}
 }
-func (h *DocsHandler) GetPublicManifest(c *gin.Context) {
-	data, err := h.service.GetManifest(false)
+func (h *DocsHandler) GetManifest(c *gin.Context) {
+	role := c.GetString("role")
+	if role == "USER" {
+		data, err := h.service.GetManifest(false)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(200, gin.H{"data": data})
+		return
+	}
+
+	// role is anything else: serves both public and private/internal manifest categories merged
+	pubData, err := h.service.GetManifest(false)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"data": data})
-}
 
-func (h *DocsHandler) GetInternalManifest(c *gin.Context) {
-	data, err := h.service.GetManifest(true)
+	intData, err := h.service.GetManifest(true)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(200, gin.H{"data": data})
+
+	// Merge categories
+	mergedCategories := append(pubData.Categories, intData.Categories...)
+	combined := &application.DocManifest{
+		Service:    pubData.Service,
+		Version:    pubData.Version,
+		Categories: mergedCategories,
+	}
+
+	c.JSON(200, gin.H{"data": combined})
 }
 
-func (h *DocsHandler) GetPublicDoc(c *gin.Context) {
+func (h *DocsHandler) GetDoc(c *gin.Context) {
 	slug := c.Param("slug")
+	role := c.GetString("role")
 
+	if role == "USER" {
+		doc, err := h.service.GetDoc(slug, false)
+		if err != nil {
+			c.JSON(404, gin.H{"error": "not found"})
+			return
+		}
+		c.JSON(200, gin.H{"data": doc})
+		return
+	}
+
+	// Try public first
 	doc, err := h.service.GetDoc(slug, false)
 	if err != nil {
-		c.JSON(404, gin.H{"error": "not found"})
-		return
-	}
-
-	c.JSON(200, gin.H{"data": doc})
-}
-
-func (h *DocsHandler) GetInternalDoc(c *gin.Context) {
-	slug := c.Param("slug")
-
-	doc, err := h.service.GetDoc(slug, true)
-	if err != nil {
-		c.JSON(404, gin.H{"error": "not found"})
-		return
+		// Try internal
+		doc, err = h.service.GetDoc(slug, true)
+		if err != nil {
+			c.JSON(404, gin.H{"error": "not found"})
+			return
+		}
 	}
 
 	c.JSON(200, gin.H{"data": doc})

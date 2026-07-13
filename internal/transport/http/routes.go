@@ -1,6 +1,8 @@
 package http
 
 import (
+	"rds/internal/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,6 +19,9 @@ func RegisterRoutes(router *gin.Engine, handlers *Handlers) {
 	// API v1 group
 	v1 := router.Group("/api/v1/rds")
 
+	// Use user details auth middleware
+	v1.Use(middleware.AuthContextMiddleware())
+
 	// Register domain-specific routes
 	if handlers.ClaudeDB != nil {
 		registerClaudeDBRoutes(v1, handlers.ClaudeDB)
@@ -28,13 +33,8 @@ func RegisterRoutes(router *gin.Engine, handlers *Handlers) {
 func registerDocsRoutes(v1 *gin.RouterGroup, handler *DocsHandler) {
 	docs := v1.Group("/docs")
 	{
-		docs.GET("", handler.GetPublicManifest)
-		docs.GET("/:slug", handler.GetPublicDoc)
-	}
-	internal := v1.Group("/internal/docs")
-	{
-		internal.GET("", handler.GetInternalManifest)
-		internal.GET("/:slug", handler.GetInternalDoc)
+		docs.GET("", handler.GetManifest)
+		docs.GET("/:slug", handler.GetDoc)
 	}
 }
 func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
