@@ -6,47 +6,47 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-
 type DocsHandler struct {
 	service *application.DocsService
 }
+
 func NewDocsHandler(service *application.DocsService) *DocsHandler {
 	return &DocsHandler{service: service}
 }
+
 func (h *DocsHandler) GetManifest(c *gin.Context) {
 	role := c.GetString("role")
-	if role == "USER" {
-		data, err := h.service.GetManifest(false)
-		if err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(200, gin.H{"data": data})
-		return
-	}
 
-	// role is anything else: serves both public and private/internal manifest categories merged
 	pubData, err := h.service.GetManifest(false)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
+	if role == "USER" {
+		// USER only ever gets the public scope
+		c.JSON(200, gin.H{
+			"data": gin.H{
+				"public": pubData,
+			},
+		})
+		return
+	}
+
+	// ADMIN / ENGINEER (or any non-USER role): send both scopes, unmerged,
+	// so the frontend can tell them apart.
 	intData, err := h.service.GetManifest(true)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Merge categories
-	mergedCategories := append(pubData.Categories, intData.Categories...)
-	combined := &application.DocManifest{
-		Service:    pubData.Service,
-		Version:    pubData.Version,
-		Categories: mergedCategories,
-	}
-
-	c.JSON(200, gin.H{"data": combined})
+	c.JSON(200, gin.H{
+		"data": gin.H{
+			"public":   pubData,
+			"internal": intData,
+		},
+	})
 }
 
 func (h *DocsHandler) GetDoc(c *gin.Context) {
