@@ -112,9 +112,9 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 		return
 	}
 
-	userID, err := extractAccountID(c)
-	if err != nil {
-		respond(c, http.StatusUnauthorized, err.Error(), nil)
+	userID := c.GetString("userId")
+	if userID =="" {
+		respond(c, http.StatusUnauthorized, "Unauthorized", nil)
 		return
 	}
 
