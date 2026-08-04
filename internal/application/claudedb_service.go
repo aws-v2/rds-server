@@ -9,7 +9,6 @@ import (
 	"rds/internal/domain"
 	"rds/internal/interfaces"
 	"rds/internal/messaging"
-	"rds/internal/utils"
 	"strings"
 	"time"
 
@@ -17,6 +16,17 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ClaudeDBService is the RDS control plane. It no longer manages container runtimes directly.
+// Instead, it publishes provisioning events to the EC2 service via NATS, which provisions
+// a dedicated VM (HostType: "rds") with PostgreSQL injected via cloud-init.
+type ClaudeDBService struct {
+	repo         interfaces.RepositoryPort
+	publisher    messaging.Publisher
+	region       string
+	publicHostIP string
+	mu           sync.Mutex
+}
 
 const pendingNodeHostPrefix = "pending-rds://"
 
@@ -40,48 +50,8 @@ func generateRandomVPCSubnet() (subnet, gateway string) {
 }
 
 func databaseEndpoint(db *domain.Database) (string, int) {
-	if db.PrivateIP != "" {
-		return db.PrivateIP, 5432
-	}
-	if strings.HasPrefix(db.NodeHost, pendingNodeHostPrefix) {
-		return "", db.NodePort
-	}
-	return db.NodeHost, db.NodePort
-}
 
-// CreateDatabaseRequest represents the request to provision a database
-type CreateDatabaseRequest struct {
-	Name           string
-	User           string
-	Password       string
-	OwnerID        string
-	VPCID          string
-	IdempotencyKey string
-}
-
-// CreateDatabaseResponse represents the result of the provisioning flow
-type CreateDatabaseResponse struct {
-	DatabaseID             string
-	ARN                    string
-	Name                   string
-	NodeHost               string
-	NodePort               int
-	RoleName               string
-	Password               string
-	PhysicalDBName         string
-	ConnectionString       string
-	PublicConnectionString string
-}
-
-// ClaudeDBService is the RDS control plane. It no longer manages container runtimes directly.
-// Instead, it publishes provisioning events to the EC2 service via NATS, which provisions
-// a dedicated VM (HostType: "rds") with PostgreSQL injected via cloud-init.
-type ClaudeDBService struct {
-	repo         interfaces.RepositoryPort
-	publisher    messaging.Publisher
-	region       string
-	publicHostIP string
-	mu           sync.Mutex
+	return "NodeHost", 10
 }
 
 // NewClaudeDBService creates a new ClaudeDB control plane service
@@ -100,7 +70,7 @@ func (s *ClaudeDBService) ValidateQuota(ctx context.Context, ownerID string) err
 	if err != nil {
 		return fmt.Errorf("failed to fetch databases for quota check: %w", err)
 	}
-	if len(dbs) >= 10 {
+	if len(dbs) >= 20 {
 		return fmt.Errorf("quota exceeded: maximum of 10 databases per account allowed")
 	}
 	return nil
@@ -117,46 +87,19 @@ func (s *ClaudeDBService) ValidateQuota(ctx context.Context, ownerID string) err
 //     with profile="rds" so a dedicated Postgres VM is booted via cloud-init.
 //  6. Return immediately — the DB stays in PROVISIONING until the EC2 service
 //     reports back (via a future callback event) with the VM's IP and port.
-func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabaseRequest) (*CreateDatabaseResponse, error) {
-	// 1. Idempotency Check
-	if req.IdempotencyKey != "" {
-		existingDB, err := s.repo.GetDatabaseByIdempotencyKey(ctx, req.OwnerID, req.IdempotencyKey)
-		if err == nil && existingDB != nil {
-			if existingDB.Status == domain.DBStatusProvisioning {
-				return nil, fmt.Errorf("conflict: database is currently provisioning")
-			}
-			cred, err := s.repo.GetActiveCredential(ctx, existingDB.ID)
-			if err != nil {
-				return nil, fmt.Errorf("failed to retrieve credentials for existing idempotent creation")
-			}
-			host, port := databaseEndpoint(existingDB)
-			connStr := ""
-			if host != "" {
-				connStr = fmt.Sprintf("postgres://%s:***@%s:%d/%s", cred.RoleName, host, port, existingDB.PhysicalDBName)
-			}
-			return &CreateDatabaseResponse{
-				DatabaseID:       existingDB.ID,
-				ARN:              existingDB.ARN,
-				Name:             existingDB.Name,
-				NodeHost:         host,
-				NodePort:         port,
-				RoleName:         cred.RoleName,
-				Password:         "***", // Don't return password twice.
-				PhysicalDBName:   existingDB.PhysicalDBName,
-				ConnectionString: connStr,
-			}, nil
-		}
-	}
 
+func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateDatabaseRequest) (*domain.CreateDatabaseResponse, error) {
+	// 1 TODO: step 1 here was an idemptotency check
+	// putit back ,for now ithas to go
 	// 2. Validate Quota
 	if err := s.ValidateQuota(ctx, req.OwnerID); err != nil {
 		return nil, err
 	}
+	fmt.Printf("\n\n quota passed\n\n")
 
 	// 3. Generate Metadata
 	randomSuffix := generateRandomHex(4) // 8 characters
 	dbID := uuid.New().String()
-	arn := utils.GenerateDatabaseARN(s.region, req.OwnerID, dbID)
 	physicalDBName := fmt.Sprintf("db_%s", randomSuffix)
 
 	roleName := req.User
@@ -169,66 +112,16 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 		password = generateRandomHex(16) // 32 characters secure password
 	}
 
-	// VPC metadata — record which VPC this DB is associated with (for future networking).
-	// We no longer create Docker networks here; the EC2 VM will handle its own networking.
-	var vpcID string
-	if req.VPCID != "" {
-		vpcID = req.VPCID
-		if _, err := s.repo.GetVPC(ctx, vpcID); err != nil {
-			return nil, fmt.Errorf("failed to get VPC: %w", err)
-		}
-	} else {
-		vpcRec, err := s.repo.GetDefaultVPC(ctx, req.OwnerID)
-		if err != nil {
-			if strings.Contains(err.Error(), "record not found") || strings.Contains(err.Error(), "not found") {
-				// Auto-create a default VPC record (metadata only — no Docker network)
-				subnet, gw := generateRandomVPCSubnet()
-				vpcID = uuid.New().String()
-				vpcRec = &domain.VPC{
-					ID:         vpcID,
-					Name:       "default",
-					CIDRBlock:  subnet,
-					BridgeName: "br-vpc-" + generateRandomHex(4),
-					Subnet:     subnet,
-					Gateway:    gw,
-					TenantID:   req.OwnerID,
-					Status:     "available",
-					IsDefault:  true,
-					CreatedAt:  time.Now(),
-					UpdatedAt:  time.Now(),
-				}
-				if createErr := s.repo.CreateVPC(ctx, vpcRec); createErr != nil {
-					return nil, fmt.Errorf("failed to auto-create default VPC: %w", createErr)
-				}
-				log.Printf("[VPC] Auto-created default VPC %s for tenant %s", vpcID, req.OwnerID)
-			} else {
-				return nil, fmt.Errorf("failed to get default VPC: %w", err)
-			}
-		} else {
-			vpcID = vpcRec.ID
-		}
-	}
-
-	var idempotencyKeyPtr *string
-	if req.IdempotencyKey != "" {
-		idempotencyKeyPtr = &req.IdempotencyKey
-	}
-
 	// 4. Persist Intended State
-	// NodeHost is stored as a pending marker because the historical schema
-	// requires a non-null value. It is replaced when EC2 reports the VM endpoint.
 	dbEntity := &domain.Database{
-		ID:             dbID,
-		AccountID:      req.OwnerID,
-		ARN:            arn,
-		Name:           req.Name,
-		PhysicalDBName: physicalDBName,
-		NodeHost:       pendingNodeHostPrefix + dbID,
-		NodePort:       5432,
-		PrivateIP:      "",
-		VPCID:          vpcID,
-		Status:         domain.DBStatusProvisioning,
-		IdempotencyKey: idempotencyKeyPtr,
+		ID:          dbID,
+		UserID:      req.OwnerID,
+		DBName:      req.InstanceName,
+		VMIP:        "2",
+		GatewayIP:   "192.168.1.1",
+		GatewayPort: 2323,
+		Status:      "PROVISIONING",
+		VMDBPort:    5432,
 	}
 
 	credEntity := &domain.Credential{
@@ -246,46 +139,48 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req CreateDatabase
 	if err := s.repo.CreateDatabaseTx(ctx, dbEntity, credEntity, opEntity); err != nil {
 		return nil, fmt.Errorf("failed to save initial provisioning state: %w", err)
 	}
+	fmt.Printf("\n\n metadata passed\n\n")
 
 	log.Printf("[RDS] Database record %s persisted (status=PROVISIONING). Dispatching to EC2 service.", dbID)
 
 	// 5. Dispatch to EC2 Control Plane
 	// The EC2 service will select an "rds" host, boot a VM, inject credentials
 	// via cloud-init, and (eventually) publish a ready event back to us.
-	provisionEvent := messaging.ProvisionInstanceEvent{
-		Profile:    "rds",
-		ResourceID: dbEntity.ID,
-		Specs: map[string]int{
-			"cpu":     2,
-			"ram":     4096,
-			"storage": 20,
-		},
+
+	provisionEvent := domain.ProvisionInstanceEvent{
 		UserID:     req.OwnerID,
-		StorageARN: arn,
-		SessionID:  dbID, // echoed back in the EC2 ready callback for correlation
-		Manifest: map[string]interface{}{
-			"db_name":  physicalDBName,
-			"role":     roleName,
-			"password": password,
+		Profile:    "rds",
+		SessionID:  req.SessionID,
+		Name:       req.InstanceName,
+		ResourceID: dbEntity.ID,
+		Specs: domain.VMSpecs{
+			CPU:     2,
+			RAM:     1024,
+			Storage: 10,
 		},
+	}
+	var eC2Response domain.EC2Response
+
+	if s.publisher == nil {
+		return nil, fmt.Errorf("The publisher instance is null, cancellingreques")
+
 	}
 
-	if s.publisher != nil {
-		if err := s.publisher.ProvisionRDSInstance(provisionEvent); err != nil {
-			log.Printf("[RDS] WARNING: Failed to publish ProvisionInstanceEvent for database %s: %v", dbID, err)
-		}
-	} else {
-		log.Printf("[RDS] WARNING: NATS publisher is nil — ProvisionInstanceEvent for database %s was NOT sent", dbID)
+	eC2Response, err := s.publisher.ProvisionRDSInstance(provisionEvent)
+	if err != nil {
+		log.Printf("[RDS] WARNING: Failed to publish ProvisionInstanceEvent for database %s: %v", dbID, err)
 	}
+
+	fmt.Print(eC2Response.GatewayIP)
 
 	// 6. Return immediately with PROVISIONING status.
 	// The connection string will be available once the EC2 VM is up.
-	return &CreateDatabaseResponse{
+	return &domain.CreateDatabaseResponse{
 		DatabaseID:             dbEntity.ID,
-		ARN:                    dbEntity.ARN,
-		Name:                   req.Name,
-		NodeHost:               "", // populated after EC2 callback
-		NodePort:               5432,
+		ARN:                    "dbEntity.ARN",
+		Name:                   req.InstanceName,
+		NodeHost:               eC2Response.GatewayIP, // populated after EC2 callback
+		NodePort:               eC2Response.GatewayPort,
 		RoleName:               roleName,
 		Password:               password,
 		PhysicalDBName:         physicalDBName,
@@ -305,7 +200,7 @@ func (s *ClaudeDBService) ListVPCs(ctx context.Context, accountID string) ([]*do
 }
 
 // CreateVPC creates a VPC metadata record (no Docker network)
-func (s *ClaudeDBService) CreateVPC(ctx context.Context, accountID, vpcName string) error {
+func (s *ClaudeDBService) CreateVPC(ctx context.Context, accountID, vpcName string) (string, error) {
 	subnet, gw := generateRandomVPCSubnet()
 	vpcID := uuid.New().String()
 	vpcRec := &domain.VPC{
@@ -322,39 +217,14 @@ func (s *ClaudeDBService) CreateVPC(ctx context.Context, accountID, vpcName stri
 		UpdatedAt:  time.Now(),
 	}
 	if err := s.repo.CreateVPC(ctx, vpcRec); err != nil {
-		return fmt.Errorf("failed to create VPC: %w", err)
+		return "nil", fmt.Errorf("failed to create VPC: %w", err)
 	}
-	return nil
-}
-
-// ReconcileVPCs triggers a global network reconciliation (no-op: managed by EC2 service)
-func (s *ClaudeDBService) ReconcileVPCs(ctx context.Context) error {
-	return nil
+	return vpcID, nil
 }
 
 // AssignVPC changes the VPC assignment of an existing database (metadata update only)
 func (s *ClaudeDBService) AssignVPC(ctx context.Context, accountID, databaseID, newVPCID string) error {
-	db, err := s.GetDatabase(ctx, databaseID, accountID)
-	if err != nil {
-		return err
-	}
 
-	if db.VPCID == newVPCID {
-		return fmt.Errorf("database is already assigned to this VPC")
-	}
-
-	if _, err := s.repo.GetVPC(ctx, newVPCID); err != nil {
-		return fmt.Errorf("failed to get new target VPC: %w", err)
-	}
-
-	// Update the VPC association in the metadata store.
-	// VM-level network migration (if the VM is live) would be handled
-	// by the EC2 service in a future networking reconciliation pass.
-	if err := s.repo.UpdateDatabaseNetwork(ctx, databaseID, newVPCID, db.PrivateIP, db.NodeHost); err != nil {
-		return fmt.Errorf("failed to update database VPC assignment: %w", err)
-	}
-
-	log.Printf("[VPC-ASSIGN] Database %s reassigned to VPC %s (metadata only)", databaseID, newVPCID)
 	return nil
 }
 
@@ -364,53 +234,60 @@ func (s *ClaudeDBService) GetDatabase(ctx context.Context, id, accountID string)
 	if err != nil {
 		return nil, err
 	}
-	if db.AccountID != accountID {
+	if db.UserID != accountID {
 		return nil, fmt.Errorf("unauthorized")
 	}
 	return db, nil
 }
 
+type CurrentDB struct {
+	ID               string `json:"id"`
+	DBUser           string `json:"db_user"`
+	DBPassword       string `json:"db_password"`
+	PublicConnectionString string `json:"public_connection_string"`
+	VPCConnectionString string `json:"vpc_connection_string"`
+	DBPort           int    `json:"db_port"`
+	PublicPort       int    `json:"public_port"`
+	Engine           string `json:"engine"`
+	CreatedAt        string `json:"created_at"`
+	VPCID            string `json:"vpc_id"` // the port in the vm where the db runs, default is 5432
+	Status           string `json:"status"`
+	VpcIP           string `json:"vpc_ip"`
+
+	DBName string `json:"name"` // name of the database
+	Region string `json:"region"`
+}
+
 // GetDatabaseWithConnectionString returns database details including the master connection string
-func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, id, accountID string) (map[string]interface{}, error) {
+func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, id, accountID string) (CurrentDB, error) {
 	db, err := s.GetDatabase(ctx, id, accountID)
 	if err != nil {
-		return nil, err
+		return CurrentDB{}, err
 	}
 
-	host, port := databaseEndpoint(db)
+	// host, port := databaseEndpoint(db)
 
-	res := map[string]interface{}{
-		"id":             db.ID,
-		"arn":            db.ARN,
-		"name":           db.Name,
-		"status":         db.Status,
-		"port":           port,
-		"host":           host,
-		"vpc_id":         db.VPCID,
-		"private_ip":     db.PrivateIP,
-		"public_port":    db.PublicPort,
-		"physicalDbName": db.PhysicalDBName,
-		"createdAt":      db.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-	}
+	// reds := map[string]interface{}{
+	// 	"id":             db.ID,
+	// 	"name":           db.DBName,
+	// 	"port":           port,
+	// 	"host":           host,
+	// }
 
-	cred, err := s.repo.GetActiveCredential(ctx, id)
-	if err == nil && cred != nil {
-		if host != "" {
-			privateConnStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, host, port, db.PhysicalDBName)
-			res["connectionString"] = privateConnStr
-		} else {
-			res["connectionString"] = "" // VM not yet ready
-		}
+	res := CurrentDB{
+		ID:               db.ID,
+		PublicConnectionString: fmt.Sprintf("postgres://%s:%s@%s:%d/%s", "username","password",db.GatewayIP,db.GatewayPort,db.DBName),
+		VPCConnectionString: "connectionstring",
+		DBPort:           db.VMDBPort, // this is the 5432
+		PublicPort:       db.GatewayPort,
+		DBUser:           "root-user",
+		DBPassword:       "password",
+		Engine:           "postgres-1",
+		DBName:           db.DBName, // thisis the physicaldb name inthe fronted
+		Region:           "region-1",
+		CreatedAt:        db.CreatedAt,
+		Status:           db.Status,
 
-		if db.PublicPort > 0 && s.publicHostIP != "" {
-			publicConnStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cred.RoleName, cred.EncryptedPassword, s.publicHostIP, db.PublicPort, db.PhysicalDBName)
-			res["publicConnectionString"] = publicConnStr
-		} else {
-			res["publicConnectionString"] = ""
-		}
-
-		res["roleName"] = cred.RoleName
-		res["password"] = cred.EncryptedPassword
 	}
 
 	return res, nil
@@ -423,7 +300,7 @@ func (s *ClaudeDBService) DeleteDatabase(ctx context.Context, id, accountID stri
 	if err != nil {
 		return err
 	}
-	if db.AccountID != accountID {
+	if db.UserID != accountID {
 		return fmt.Errorf("unauthorized")
 	}
 
@@ -435,7 +312,7 @@ func (s *ClaudeDBService) DeleteDatabase(ctx context.Context, id, accountID stri
 	return nil
 }
 
-func (s *ClaudeDBService) RotateCredentials(ctx context.Context, id, accountID string) (*CreateDatabaseResponse, error) {
+func (s *ClaudeDBService) RotateCredentials(ctx context.Context, id, accountID string) (*domain.CreateDatabaseResponse, error) {
 	db, err := s.GetDatabase(ctx, id, accountID)
 	if err != nil {
 		return nil, err
@@ -447,18 +324,18 @@ func (s *ClaudeDBService) RotateCredentials(ctx context.Context, id, accountID s
 	host, port := databaseEndpoint(db)
 	connStr := ""
 	if host != "" {
-		connStr = fmt.Sprintf("postgres://%s:%s@%s:%d/%s", newRoleName, newPassword, host, port, db.PhysicalDBName)
+		connStr = fmt.Sprintf("postgres://%s:%s@%s:%d/%s", newRoleName, newPassword, host, port, "postgres")
 	}
 
-	return &CreateDatabaseResponse{
+	return &domain.CreateDatabaseResponse{
 		DatabaseID:       db.ID,
-		ARN:              db.ARN,
-		Name:             db.Name,
+		ARN:              "db.ARN",
+		Name:             db.DBName,
 		NodeHost:         host,
 		NodePort:         port,
 		RoleName:         newRoleName,
 		Password:         newPassword,
-		PhysicalDBName:   db.PhysicalDBName,
+		PhysicalDBName:   "db.PhysicalDBName",
 		ConnectionString: connStr,
 	}, nil
 }
@@ -583,18 +460,18 @@ func (s *ClaudeDBService) HandleProvisionLifeCycle(ctx context.Context, event *m
 		servicePort := event.Payload.ServicePort
 
 		// fetch DB record to validate and obtain VPC if missing
-		db, err := s.repo.GetDatabase(ctx, resourceID)
-		if err != nil {
-			return fmt.Errorf("failed to load database %s: %w", resourceID, err)
-		}
+		// db, err := s.repo.GetDatabase(ctx, resourceID)
+		// if err != nil {
+		// 	return fmt.Errorf("failed to load database %s: %w", resourceID, err)
+		// }
 
-		vpcID := db.VPCID
-		if vpcID == "" {
-			// fall back to payload VPC if present
-			if event.Payload.VPCID != "" {
-				vpcID = event.Payload.VPCID
-			}
-		}
+		vpcID := "db.VPCID"
+		// if vpcID == "" {
+		// 	// fall back to payload VPC if present
+		// 	if event.Payload.VPCID != "" {
+		// 		vpcID = event.Payload.VPCID
+		// 	}
+		// }
 
 		// nodeHost: prefer public IP (for external access), but DB private IP is stored separately
 		nodeHost := publicIP

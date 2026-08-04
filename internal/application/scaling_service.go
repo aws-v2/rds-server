@@ -61,8 +61,11 @@ func NewScalingService(repo interfaces.RepositoryPort, dockerClient interfaces.D
 func (s *ScalingService) Start() {
 	log.Println("[SCALING] Starting Vertical Scaling Service...")
 
-	s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.out", s.natsPrefix), s.handleScalingMessage)
-	s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.in", s.natsPrefix), s.handleScalingMessage)
+	if s.nats != nil {
+		s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.out", s.natsPrefix), s.handleScalingMessage)
+		s.nats.Subscribe(fmt.Sprintf("%s.rds.scale.in", s.natsPrefix), s.handleScalingMessage)
+	}
+
 }
 
 func (s *ScalingService) handleScalingMessage(m *nats.Msg) {

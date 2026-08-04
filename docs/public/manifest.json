@@ -1,24 +1,23 @@
 {
-  "service": "rds-service",
-  "version": "V10",
+  "service": "RDS-service",
+  "version": "V1",
   "type": "internal-docs",
-  "description": "Internal engineering documentation for the RDS service. Covers database provisioning, instance lifecycle, storage management, backups, and runtime operations for managed relational databases.",
-  "audience": "engineers",
-  "visibility": "internal-only",
+  "description": "Internal engineering documentation for the SageMaker service. Covers pipeline execution, VM orchestration, task scheduling, SDK design, artifact management, container runtime, deployment, and platform architecture.",
+  "audience": "developers",
+  "visibility": "public",
 
   "categories": [
     {
       "title": "Getting Started",
       "items": [
-        { "title": "RDS Overview", "slug": "s3-overview" },
-        { "title": "Quickstart Guide", "slug": "s3-quickstart" }
-      ]
-    },
-    {
-      "title": "Core Concepts",
-      "items": [
-        { "title": "Database Instances", "slug": "s3-buckets" },
-        { "title": "Databases & Schemas", "slug": "s3-objects" }
+        {
+          "title": "Overview & Architecture",
+          "slug": "architecture"
+        },
+        {
+          "title": "Api Architexture",
+          "slug": "api-architexture"
+        }
       ]
     }
   ]

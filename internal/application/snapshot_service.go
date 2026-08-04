@@ -35,22 +35,22 @@ type CreateSnapshotRequest struct {
 }
 
 // CreateSnapshot captures the state of a database volume
-func (s *SnapshotService) CreateSnapshot(ctx context.Context, req CreateSnapshotRequest) (*domain.Snapshot, error) {
+func (s *SnapshotService) CreateSnapshot(ctx context.Context, req domain.CreateSnapshotPayload, userID string) (*domain.Snapshot, error) {
 	// 1. Verify DB is valid and belongs to user
 	db, err := s.repo.GetDatabase(ctx, req.DatabaseID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database %s: %w", req.DatabaseID, err)
 	}
-	if db.AccountID != req.AccountID {
+	if db.UserID != userID {
 		return nil, fmt.Errorf("unauthorized")
 	}
 
 	snapID := uuid.New().String()
-	arn := utils.GenerateSnapshotARN(s.region, req.AccountID, snapID)
+	arn := utils.GenerateSnapshotARN(s.region, userID, snapID)
 
 	snap := &domain.Snapshot{
 		ID:         snapID,
-		AccountID:  req.AccountID,
+		AccountID:  userID,
 		ARN:        arn,
 		Name:       req.Name,
 		DatabaseID: db.ID,
@@ -109,7 +109,7 @@ type RestoreDatabaseRequest struct {
 }
 
 // RestoreDatabase provisions a brand new Database seeded from the snapshot's data
-func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDatabaseRequest) (*CreateDatabaseResponse, error) {
+func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDatabaseRequest) (*domain.CreateDatabaseResponse, error) {
 	// 1. Validate snapshot exists and belongs to the account
 	snap, err := s.repo.GetSnapshot(ctx, req.SnapshotID)
 	if err != nil {
@@ -131,7 +131,7 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 	// 3. Resolve the restored database name
 	restoredName := req.NewName
 	if restoredName == "" {
-		restoredName = fmt.Sprintf("%s-restored", sourceDB.Name)
+		restoredName = fmt.Sprintf("%s-restored", sourceDB.DBName)
 	}
 
 	// 4. Generate new metadata for the restored database
@@ -146,12 +146,8 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 	// 5. Persist intended state in control plane
 	dbEntity := &domain.Database{
 		ID:             dbID,
-		AccountID:      req.AccountID,
-		ARN:            arn,
-		Name:           restoredName,
-		PhysicalDBName: physicalDBName,
-		NodeHost:       nodeHost,
-		Status:         domain.DBStatusProvisioning,
+		UserID:      req.AccountID,
+		DBName:           restoredName,
 	}
 	credEntity := &domain.Credential{
 		RoleName:          roleName,
@@ -185,7 +181,6 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 	containerConfig := domain.ContainerConfig{
 		Name:          fmt.Sprintf("claudedb-prod-%s", dbEntity.ID),
 		Image:         image,
-		HostPort:      dbEntity.NodePort, // ← 1000, 1001... allocated per instance
 		ContainerPort: 5432,              // ← always 5432 inside the container
 		User:          roleName,
 		Password:      password,
@@ -220,7 +215,7 @@ func (s *SnapshotService) RestoreDatabase(ctx context.Context, req RestoreDataba
 	}
 
 	connStr := fmt.Sprintf("postgres://%s:%s@%s:5432/%s", roleName, password, nodeHost, physicalDBName)
-	return &CreateDatabaseResponse{
+	return &domain.CreateDatabaseResponse{
 		DatabaseID:       dbEntity.ID,
 		ARN:              arn,
 		Name:             restoredName,

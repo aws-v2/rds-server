@@ -98,6 +98,29 @@ jobs:
               -e AWS_REGION=eu-north-1 \
               qarani/rds-server:staging-${{github.sha}}
 
+
+# APP_PROFILE=STAGING
+# EUREKA_HOSTNAME=rds-server-staging
+# EUREKA_IP_ADDR=127.0.0.1
+# RDS_PORT=8087
+# DB_HOST=ep-purple-feather-aypga34j-pooler.c-5.us-east-2.aws.neon.tech
+# DB_PORT=5432
+# DB_USER=neondb_owner
+# DB_PASSWORD=npg_EHvDpaNKS73u
+# DB_NAME=rds_db
+# NATS_URL=nats://nats-staging:4222
+# NATS_USERNAME=nats-staging-user
+# NATS_PASSWORD=nats-staging-password
+# EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka
+# PUBLIC_HOST_IP=192.168.1.7
+# AWS_REGION=eu-north-1
+
+
+
+# postgresql://neondb_owner:****************@ep-purple-feather-aypga34j-pooler.c-5.us-east-2.aws.neon.tech/rds_db?sslmode=require&channel_binding=require
+
+
+
   staging-open-pr-to-main:
     needs: staging-deploy
     runs-on: ubuntu-latest

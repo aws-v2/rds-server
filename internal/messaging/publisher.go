@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"rds/internal/domain"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
-	"rds/internal/domain"
 )
 
 // Publisher defines the interface for instance network operations.
@@ -25,7 +25,7 @@ type Publisher interface {
 	DeleteScalingPolicy(tenantID, policyID string) error
 
 	// ProvisionRDSInstance dispatches a VM provisioning request to the EC2 service.
-	ProvisionRDSInstance(event ProvisionInstanceEvent) error
+	ProvisionRDSInstance(event domain.ProvisionInstanceEvent) (domain.EC2Response,error)
 }
 
 // NATSPublisher implements the Publisher interface using NATS Request-Response pattern.
@@ -422,35 +422,56 @@ type ProvisionInstanceEvent struct {
 	Profile    string                 `json:"profile"`
 	Specs      map[string]int         `json:"specs"`
 	UserID     string                 `json:"user_id"`
-	ResourceID    string            `json:"resource_id"`
+	ResourceID string                 `json:"resource_id"`
 	StorageARN string                 `json:"storage_arn"`
 	Manifest   map[string]interface{} `json:"manifest"`
 	SessionID  string                 `json:"session_id"`
+}
+
+type m struct {
+	Payload    string `json:"payload"`
+	UserId     string `json:"userId"`
+	InstanceID string `json:"instanceId"`
 }
 
 // ProvisionRDSInstance publishes a VM provisioning event to the EC2 service.
 // This is a fire-and-forget publish: the EC2 service handles scheduling,
 // host selection, and cloud-init injection. The SessionID (= database ID) is
 // used to correlate the async callback when the VM becomes ready.
-func (p *NATSPublisher) ProvisionRDSInstance(event ProvisionInstanceEvent) error {
+
+
+
+func (p *NATSPublisher) ProvisionRDSInstance(event domain.ProvisionInstanceEvent) (domain.EC2Response,error) {
 	correlationID := uuid.New().String()
-	subject := fmt.Sprintf("%s.ec2.task.provision",p.prefix)
+	// subject := fmt.Sprintf("%s.iam.token.generate",p.prefix)
+	subject := fmt.Sprintf("%s.ec2.task.provision", p.prefix)
 
 	data, err := json.Marshal(event)
+
 	if err != nil {
-		return fmt.Errorf("failed to marshal ProvisionInstanceEvent: %w", err)
+		return domain.EC2Response{}, fmt.Errorf("failed to marshal ProvisionInstanceEvent: %w", err)
 	}
 
 	log.Printf("[RDS-NATS] [PROVISION] subject=%s correlation_id=%s session_id=%s profile=%s user_id=%s",
 		subject, correlationID, event.SessionID, event.Profile, event.UserID)
 
-	if err := p.nc.Publish(subject, data); err != nil {
+	// if err := p.nc.Publish(subject, data); err != nil {
+	reply, err := p.nc.Request(subject, data, time.Minute*3)
+	if err != nil {
 		log.Printf("[RDS-NATS] [ERROR] ProvisionRDSInstance failed: correlation_id=%s error=%v", correlationID, err)
-		return fmt.Errorf("failed to publish ProvisionInstanceEvent: %w", err)
+		return domain.EC2Response{},fmt.Errorf("failed to publish ProvisionInstanceEvent: %w", err)
 	}
 
-	log.Printf("[RDS-NATS] [SUCCESS] ProvisionRDSInstance published: correlation_id=%s resource=%s", correlationID, event.ResourceID)
-	return nil
+	var ec2Response domain.EC2Response
+
+	errr := json.Unmarshal(reply.Data, &ec2Response)
+	if errr != nil {
+		log.Printf("[RDS-NATS] [ERROR] ProvisionRDSInstance failed tounmarshalthe reply: correlation_id=%s error=%v", correlationID, err)
+		return domain.EC2Response{}, fmt.Errorf("failed to publish ProvisionInstanceEvent: %w", err)
+	}
+
+	log.Printf("[RDS-NATS] [SUCCESS] Got a replyt: correlation_id=%s resource=%v", ec2Response.GatewayIP, ec2Response.GatewayPort)
+	return ec2Response, nil
 }
 
 // DeleteScalingPolicy publishes a delete event for a scaling policy.

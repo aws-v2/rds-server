@@ -3,17 +3,20 @@ package database
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"fmt"
-	// "os"
-	// "path/filepath"
-	// "sort"
+	"log/slog"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
-	// "github.com/jmoiron/sqlx"
-
 )
+
+//go:embed migrations/*.sql
+var MigrationFiles embed.FS
 
 // Config holds database connection configuration
 type Config struct {
@@ -23,6 +26,7 @@ type Config struct {
 	Password        string
 	Database        string
 	SSLMode         string
+	ChannelBinding  string
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
@@ -30,13 +34,17 @@ type Config struct {
 	NatsPrefix      string
 }
 
-
-// NewPostgresDB creates a new PostgreSQL database connection
+// NewPostgresDB creates a new PostgreSQL database connection and runs
+// migrations against it before returning.
 func NewPostgresDB(cfg Config) (*sql.DB, error) {
 	dsn := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode,
 	)
+
+	if cfg.ChannelBinding != "" {
+		dsn += fmt.Sprintf(" channel_binding=%s", cfg.ChannelBinding)
+	}
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -57,46 +65,113 @@ func NewPostgresDB(cfg Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	// Run migrations now that the connection is confirmed good
+	version, dirty, err := GetMigrationVersion(db, cfg.Database)
+	if err == nil && dirty {
+		slog.Warn("Database is dirty, forcing version", slog.Uint64("version", uint64(version)))
+		if err := ForceVersion(db, cfg.Database, int(version)); err != nil {
+			return nil, fmt.Errorf("failed to force migration version: %w", err)
+		}
+	}
+
+	if err := RunMigrations(db, cfg.Database); err != nil {
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
 	return db, nil
 }
-// func MigrateDir(db *sqlx.DB, dir string) error {
-// 	files, err := os.ReadDir(dir)
-// 	if err != nil {
-// 		return err
-// 	}
 
-// 	// Ensure order (e.g. 001_init.sql, 002_users.sql)
-// 	sort.Slice(files, func(i, j int) bool {
-// 		return files[i].Name() < files[j].Name()
-// 	})
+// RunMigrations executes all pending migrations
+func RunMigrations(db *sql.DB, dbName string) error {
+	sourceDriver, err := iofs.New(MigrationFiles, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
 
-// 	for _, file := range files {
-// 		if filepath.Ext(file.Name()) != ".sql" {
-// 			continue
-// 		}
+	databaseDriver, err := postgres.WithInstance(db, &postgres.Config{
+		DatabaseName: dbName,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create database driver: %w", err)
+	}
 
-// 		path := filepath.Join(dir, file.Name())
-// 		content, err := os.ReadFile(path)
-// 		if err != nil {
-// 			return err
-// 		}
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, dbName, databaseDriver)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
 
-// 		fmt.Println("Running migration:", file.Name())
+	slog.Info("[MIGRATE] Running up migrations")
 
-// 		if _, err := db.Exec(string(content)); err != nil {
-// 			return fmt.Errorf("failed at %s: %w", file.Name(), err)
-// 		}
-// 	}
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("migration failed: %w", err)
+	}
 
-// 	return nil
-// }
+	return nil
+}
+
+// ForceVersion forces the migration version and clears dirty state
+func ForceVersion(db *sql.DB, dbName string, version int) error {
+	sourceDriver, err := iofs.New(MigrationFiles, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to create migration source: %w", err)
+	}
+
+	databaseDriver, err := postgres.WithInstance(db, &postgres.Config{
+		DatabaseName: dbName,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create database driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, dbName, databaseDriver)
+	if err != nil {
+		return fmt.Errorf("failed to create migrator: %w", err)
+	}
+
+	if err := m.Force(version); err != nil {
+		return fmt.Errorf("failed to force version: %w", err)
+	}
+
+	return nil
+}
+
+// GetMigrationVersion returns current migration version and dirty state
+func GetMigrationVersion(db *sql.DB, dbName string) (uint, bool, error) {
+	sourceDriver, err := iofs.New(MigrationFiles, "migrations")
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to create migration source: %w", err)
+	}
+
+	databaseDriver, err := postgres.WithInstance(db, &postgres.Config{
+		DatabaseName: dbName,
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to create database driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", sourceDriver, dbName, databaseDriver)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to create migrator: %w", err)
+	}
+
+	version, dirty, err := m.Version()
+	if err != nil {
+		if err == migrate.ErrNilVersion {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("failed to get migration version: %w", err)
+	}
+
+	return version, dirty, nil
+}
+
 // DefaultConfig returns recommended production values for database configuration
 func DefaultConfig() Config {
 	return Config{
-		MaxOpenConns:    25,               // Limit total connections
-		MaxIdleConns:    5,                // Keep some connections ready
-		ConnMaxLifetime: 5 * time.Minute,  // Recycle connections
-		ConnMaxIdleTime: 10 * time.Minute, // Close idle connections
+		MaxOpenConns:    25,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 5 * time.Minute,
+		ConnMaxIdleTime: 10 * time.Minute,
 		SSLMode:         "require",
 	}
 }
@@ -108,8 +183,7 @@ func NewSQLiteDB(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	// Basic pragmas for SQLite concurrency & performance
-	db.SetMaxOpenConns(1) // SQLite is best hit via single connections in writing usually
+	db.SetMaxOpenConns(1)
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
 	}

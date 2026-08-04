@@ -49,3 +49,9 @@ func NewConfigHistory(instanceID, parameter, oldValue, newValue, changedBy strin
 
 
 
+
+// SetConfigurationRequest represents the request to set a configuration
+type SetConfigurationRequest struct {
+	Parameter string `json:"parameter" binding:"required"`
+	Value     string `json:"value" binding:"required"`
+}

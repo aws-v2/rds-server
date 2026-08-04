@@ -1,33 +1,22 @@
 CREATE TYPE db_status AS ENUM ('PENDING', 'PROVISIONING', 'AVAILABLE', 'MAINTENANCE', 'DELETED', 'FAILED');
 
-CREATE TABLE databases (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id UUID NOT NULL,               -- Links to your SaaS User/Tenant ID
-    
-    -- Identification
-    name VARCHAR(255) NOT NULL,             -- User-friendly name (e.g., "Prod API DB")
-    physical_db_name VARCHAR(64) UNIQUE,    -- Secure, generated name on the Postgres server (e.g., "db_a7f9b2")
-    
-    -- Routing
-    node_host VARCHAR(255) NOT NULL,        -- The EC2 instance IP or Internal DNS
-    node_port INTEGER DEFAULT 5432,         -- Port of the Postgres container
-    
-    -- Status & Lifecycle
-    status db_status DEFAULT 'PENDING',
-    
-    -- Idempotency
-    idempotency_key UUID UNIQUE,            -- Optional idempotency key for creation requests
-
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ                  -- Soft deletes for recovery purposes
+CREATE TABLE IF NOT EXISTS databases (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    vm_ip        TEXT NOT NULL,
+    gateway_ip   TEXT NOT NULL,
+    gateway_port INTEGER NOT NULL,
+    vm_db_port   INTEGER NOT NULL DEFAULT 5432,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
 -- Compound unique constraint for the gap-finder to prevent port collisions on the same host
-ALTER TABLE databases ADD CONSTRAINT unique_node_host_port UNIQUE (node_host, node_port);
-
+-- ALTER TABLE databases ADD CONSTRAINT unique_node_host_port UNIQUE (node_host, node_port);
+Alter table databases add column status text not null default '';
+Alter table databases add column deleted_at TIMESTAMP;
 -- Indexes for quick routing and tenant lookups
-CREATE INDEX idx_databases_account_id ON databases(account_id);
+CREATE INDEX idx_databases_account_id ON databases(user_id);
 
 
 CREATE TYPE credential_status AS ENUM ('ACTIVE', 'ROTATING', 'REVOKED');

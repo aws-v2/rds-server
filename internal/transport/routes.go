@@ -1,17 +1,19 @@
-package http
+package transport
 
 import (
-	"rds/internal/middleware"
+	handler "rds/internal/transport/handlers"
+	http "rds/internal/transport/handlers"
+	"rds/internal/transport/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Handlers struct holds all handler dependencies
 type Handlers struct {
-	ClaudeDB *ClaudeDBHandler
-	Health   *HealthHandler
-	Config   *ConfigHandler
-	Docs     *DocsHandler
+	ClaudeDB *handler.ClaudeDBHandler
+	Health   *handler.HealthHandler
+	Config   *handler.ConfigHandler
+	Docs     *handler.DocsHandler
 }
 
 // RegisterRoutes registers all application routes
@@ -30,19 +32,18 @@ func RegisterRoutes(router *gin.Engine, handlers *Handlers) {
 	registerConfigRoutes(v1, handlers.Config)
 	registerDocsRoutes(v1, handlers.Docs)
 }
-func registerDocsRoutes(v1 *gin.RouterGroup, handler *DocsHandler) {
+func registerDocsRoutes(v1 *gin.RouterGroup, handler *http.DocsHandler) {
 	docs := v1.Group("/docs")
 	{
 		docs.GET("", handler.GetManifest)
 		docs.GET("/:slug", handler.GetDoc)
 	}
 }
-func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
+func registerClaudeDBRoutes(api *gin.RouterGroup, handler *http.ClaudeDBHandler) {
 	databases := api.Group("/databases")
 	{
 		databases.POST("", handler.CreateDatabase)
 		databases.GET("", handler.ListDatabases)
-		databases.POST("/network/reconcile", handler.ReconcileNetwork)
 		databases.GET("/:id", handler.GetDatabase)
 		databases.DELETE("/:id", handler.DeleteDatabase)
 		databases.POST("/:id/rotate-credentials", handler.RotateCredentials)
@@ -89,7 +90,6 @@ func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 	// --- 6. Volume Management Routes (`/api/v1/rds/volumes`) ---
 	volumes := api.Group("/volumes")
 	{
-		// Use auth middleware for real implementation, skipped for this refactor MVP
 		volumes.POST("", handler.CreateVolume)
 		volumes.GET("", handler.ListVolumes)
 		volumes.GET("/:id", handler.GetVolume)
@@ -107,17 +107,13 @@ func registerClaudeDBRoutes(api *gin.RouterGroup, handler *ClaudeDBHandler) {
 }
 
 // registerHealthRoutes registers all health check routes
-func registerHealthRoutes(v1 *gin.RouterGroup, handler *HealthHandler) {
+func registerHealthRoutes(v1 *gin.RouterGroup, handler *handler.HealthHandler) {
 	health := v1.Group("/health")
 	{
 		health.GET("/ping", handler.Ping)
-		health.GET("/status", handler.GetStatus)
 	}
 }
-
-// registerConfigRoutes registers all configuration management routes
-func registerConfigRoutes(v1 *gin.RouterGroup, handler *ConfigHandler) {
-	// Configuration routes are nested under instances
+func registerConfigRoutes(v1 *gin.RouterGroup, handler *handler.ConfigHandler) {
 	v1.GET("/instances/:id/config", handler.GetConfiguration)
 	v1.PUT("/instances/:id/config", handler.SetConfiguration)
 	v1.GET("/instances/:id/config/history", handler.GetConfigurationHistory)

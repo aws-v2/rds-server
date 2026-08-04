@@ -92,7 +92,7 @@ func (c *MetricsCollector) collectAndSend() {
 		}
 
 		// Fetch dynamic IAM token for this instance
-		token, err := c.publisher.RequestInstanceToken(db.AccountID, db.ID)
+		token, err := c.publisher.RequestInstanceToken(db.UserID, db.ID)
 		if err != nil {
 			log.Printf("[METRICS] Failed to fetch IAM token for %s: %v", db.ID, err)
 			// We can decide to skip or use the default token.

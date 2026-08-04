@@ -1,8 +1,11 @@
-package http
+package handler
+
 
 import (
+	"fmt"
 	"net/http"
 	"rds/internal/application"
+	"rds/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,31 +25,15 @@ func NewHealthHandler(healthService *application.HealthService) *HealthHandler {
 // Ping handles simple ping requests
 func (h *HealthHandler) Ping(c *gin.Context) {
 	if h.healthService.Ping(c.Request.Context()) {
-		c.JSON(http.StatusOK, gin.H{
+
+		utils.RespondSucces(c, http.StatusCreated, "Pinged health successfully", gin.H{
 			"status":  "ok",
 			"message": "pong",
 		})
-	} else {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status":  "error",
-			"message": "service unavailable",
-		})
-	}
-}
 
-// GetStatus handles detailed health status requests
-func (h *HealthHandler) GetStatus(c *gin.Context) {
-	status, err := h.healthService.GetHealth(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	if status.Healthy {
-		c.JSON(http.StatusOK, status)
+		// c.JSON(http.StatusOK, )
 	} else {
-		c.JSON(http.StatusServiceUnavailable, status)
+		utils.RespondError(c, http.StatusServiceUnavailable, fmt.Errorf("service ping unavailable"))
+
 	}
 }

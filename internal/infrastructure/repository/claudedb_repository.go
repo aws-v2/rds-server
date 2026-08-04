@@ -22,35 +22,53 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 	}
 
 	// 1. Insert Database (port is always 5432 — containers use VPC bridge networking)
-	var idempotencyVal interface{}
-	if db.IdempotencyKey != nil {
-		idempotencyVal = *db.IdempotencyKey
-	}
+	// var idempotencyVal interface{}
+	// if db.IdempotencyKey != nil {
+	// 	idempotencyVal = *db.IdempotencyKey
+	// }
 
 	queryDb := `
-		INSERT INTO databases (id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, private_ip, vpc_id, status, idempotency_key, created_at, updated_at)
-		VALUES ($2, $3, $8, $4, $5, $1, 5432, $11, $9, $10, $6, $7, NOW(), NOW())
-		RETURNING node_port, created_at, updated_at
+		INSERT INTO databases 
+		(user_id, 
+		name,
+		vm_ip, 
+		gateway_ip, gateway_port, 
+		vm_db_port,status, created_at, updated_at )	
+		VALUES ($1, $2, $3, $4, $5, $6,$7, NOW(), NOW())
+		RETURNING gateway_ip,gateway_port 
 	`
-
+// TODO: this fmt.Sprintf shouldbe illegal,
+// however the query just wnt work, 
+// so we are subbing with instead
+	// queryDb := fmt.Sprintf(`
+		// INSERT INTO databases 
+		// (user_id, 
+		// name,
+		// vm_ip, 
+		// gateway_ip, gateway_port, 
+		// vm_db_port, created_at, updated_at, status)	VALUES (
+	// 	'%s', 
+	// 	'%s', 
+	// 	'%s', '%s', %d, %d, NOW() ,NOW(),'PROVISIONING')
+	// 	RETURNING created_at, updated_at;
+	// `, db.UserID, db.DBName, db.VMIP, db.GatewayIP, db.GatewayPort, db.VMDBPort)
 	err = tx.QueryRowContext(ctx, queryDb,
-		db.NodeHost,       // $1
-		db.ID,             // $2
-		db.AccountID,      // $3
-		db.Name,           // $4
-		db.PhysicalDBName, // $5
-		db.Status,         // $6
-		idempotencyVal,    // $7
-		db.ARN,            // $8
-		db.PrivateIP,      // $9
-		db.VPCID,          // $10
-		db.PublicPort,     // $11
-	).Scan(&db.NodePort, &db.CreatedAt, &db.UpdatedAt)
+		db.UserID,
+		db.DBName,
+		db.VMIP,
+		db.GatewayIP,
+		db.GatewayPort,
+		db.VMDBPort,
+		db.Status,
+	).Scan(&db.GatewayIP, &db.GatewayPort)
+
+	// result,err := tx.ExecContext(ctx, queryDb,) 
+ 
+	// fmt.Printf("-------didnot return an rrer %v \n ",  rk)
 
 	if err != nil {
 		return fmt.Errorf("failed to insert database: %w", err)
 	}
-
 	// 2. Insert Credential
 	if cred.ID == "" {
 		cred.ID = uuid.New().String()
@@ -106,14 +124,24 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 
 func (r *PostgresRepository) GetDatabase(ctx context.Context, id string) (*domain.Database, error) {
 	query := `
-		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, status, idempotency_key, private_ip, vpc_id, created_at, updated_at, deleted_at
+		SELECT 
+		id  ,user_id,name, vm_ip ,gateway_ip ,gateway_port, vm_db_port ,created_at,updated_at,status
+		
 		FROM databases WHERE id = $1 AND deleted_at IS NULL
 	`
+	fmt.Print(query)
 	db := &domain.Database{}
-	var idempotencyKey *string
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
-		&db.Status, &idempotencyKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+		&db.ID, 
+		&db.UserID, 
+		&db.DBName, 
+		&db.VMIP, 
+		&db.GatewayIP, 
+		&db.GatewayPort, 
+		&db.VMDBPort, 
+		&db.CreatedAt,
+		&db.UpdatedAt,
+		&db.Status,
 	)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
@@ -121,7 +149,6 @@ func (r *PostgresRepository) GetDatabase(ctx context.Context, id string) (*domai
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database: %w", err)
 	}
-	db.IdempotencyKey = idempotencyKey
 	return db, nil
 }
 
@@ -131,27 +158,26 @@ func (r *PostgresRepository) GetDatabaseByIdempotencyKey(ctx context.Context, ac
 		FROM databases WHERE account_id = $1 AND idempotency_key = $2 AND deleted_at IS NULL
 	`
 	db := &domain.Database{}
-	var idKey *string
-	err := r.db.QueryRowContext(ctx, query, accountID, idempotencyKey).Scan(
-		&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
-		&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get database by idempotency key: %w", err)
-	}
-	db.IdempotencyKey = idKey
+	fmt.Print(query)
+
+	// var idKey *string
+	// err := r.db.QueryRowContext(ctx, query, accountID, idempotencyKey).Scan(
+	// 	&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
+	// 	&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+	// )
+	// if err == sql.ErrNoRows {
+	// 	return nil, ErrNotFound
+	// }
+	// if err != nil {
+	// 	return nil, fmt.Errorf("failed to get database by idempotency key: %w", err)
+	// }
+	// db.IdempotencyKey = idKey
 	return db, nil
 }
 
 func (r *PostgresRepository) ListDatabases(ctx context.Context, accountID string) ([]*domain.Database, error) {
 	query := `
-		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, status, idempotency_key, private_ip, vpc_id, created_at, updated_at, deleted_at
-		FROM databases 
-		WHERE account_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at DESC
+		SELECT id,user_id, name, vm_ip,gateway_ip,gateway_port,vm_db_port,status FROM databases WHERE user_id = $1 ORDER BY created_at DESC
 	`
 	rows, err := r.db.QueryContext(ctx, query, accountID)
 	if err != nil {
@@ -160,27 +186,27 @@ func (r *PostgresRepository) ListDatabases(ctx context.Context, accountID string
 	defer rows.Close()
 
 	var databases []*domain.Database
+
 	for rows.Next() {
 		db := &domain.Database{}
-		var idKey *string
 		if err := rows.Scan(
-			&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
-			&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+			&db.ID, &db.UserID, &db.DBName, &db.VMIP, &db.GatewayIP, &db.GatewayPort, &db.VMDBPort, &db.Status,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan database: %w", err)
 		}
-		db.IdempotencyKey = idKey
+		// 	db.IdempotencyKey = idKey
 		databases = append(databases, db)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+		// }
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	}
 	return databases, nil
 }
 
 func (r *PostgresRepository) ListAllActiveDatabases(ctx context.Context) ([]*domain.Database, error) {
 	query := `
-		SELECT id, account_id, arn, name, physical_db_name, node_host, node_port, public_port, status, idempotency_key, private_ip, vpc_id, created_at, updated_at, deleted_at
+		SELECT *
 		FROM databases 
 		WHERE status = 'AVAILABLE' AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -194,14 +220,14 @@ func (r *PostgresRepository) ListAllActiveDatabases(ctx context.Context) ([]*dom
 	var databases []*domain.Database
 	for rows.Next() {
 		db := &domain.Database{}
-		var idKey *string
-		if err := rows.Scan(
-			&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
-			&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan database: %w", err)
-		}
-		db.IdempotencyKey = idKey
+		// var idKey *string
+		// if err := rows.Scan(
+		// 	&db.ID, &db.AccountID, &db.ARN, &db.Name, &db.PhysicalDBName, &db.NodeHost, &db.NodePort, &db.PublicPort,
+		// 	&db.Status, &idKey, &db.PrivateIP, &db.VPCID, &db.CreatedAt, &db.UpdatedAt, &db.DeletedAt,
+		// ); err != nil {
+		// 	return nil, fmt.Errorf("failed to scan database: %w", err)
+		// }
+		// db.IdempotencyKey = idKey
 		databases = append(databases, db)
 	}
 	return databases, nil

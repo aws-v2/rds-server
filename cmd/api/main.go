@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"net/url"
+
 	// "os"
 	"rds/internal/application"
 	"rds/internal/config"
@@ -13,7 +14,10 @@ import (
 	"rds/internal/infrastructure/repository"
 	"rds/internal/logger"
 	"rds/internal/messaging"
-	"rds/internal/transport/http"
+	"rds/internal/transport"
+	handler "rds/internal/transport/handlers"
+
+	// "rds/internal/transport/http"
 	"rds/internal/utils"
 	"time"
 
@@ -63,15 +67,16 @@ func main() {
 					break
 				} else {
 					if i == maxRetries {
-						logger.Log.Fatal("FATAL: NATS is not reachable after retries",
+						logger.Log.Warn("NATS not reachable after retries, pressing on without it",
 							zap.String("host", host),
 							zap.String("port", port),
 							zap.Error(err))
+					} else {
+						logger.Log.Warn("NATS not reachable, retrying...",
+							zap.Int("attempt", i),
+							zap.Int("max_retries", maxRetries))
+						time.Sleep(2 * time.Second)
 					}
-					logger.Log.Warn("NATS not reachable, retrying...",
-						zap.Int("attempt", i),
-						zap.Int("max_retries", maxRetries))
-					time.Sleep(2 * time.Second)
 				}
 			}
 		}
@@ -79,24 +84,32 @@ func main() {
 
 	logger.Log.Info("Connecting to NATS", zap.String("url", cfg.NATS.URL))
 	var natsAdapter *event.NATSAdapter
-	if cfg.NATS.User != "" && cfg.NATS.Password != "" {
-		natsAdapter, err = event.NewNATSAdapterWithAuth(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password)
-	} else {
-		natsAdapter, err = event.NewNATSAdapter(cfg.NATS.URL)
-	}
+	if cfg.NATS.URL != "" {
+		var connErr error
+		if cfg.NATS.User != "" && cfg.NATS.Password != "" {
+			natsAdapter, connErr = event.NewNATSAdapterWithAuth(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password)
+		} else {
+			natsAdapter, connErr = event.NewNATSAdapter(cfg.NATS.URL)
+		}
 
-	if err != nil {
-		logger.Log.Fatal("Failed to connect to NATS", zap.Error(err))
+		if connErr != nil {
+			logger.Log.Warn("NATS not connected, pressing on without it", zap.Error(connErr))
+			natsAdapter = nil
+		}
 	}
-	defer natsAdapter.Close()
+	if natsAdapter != nil {
+		defer natsAdapter.Close()
+	}
 
 	// 1.1 Initialize NATS Publisher for Network Service
 	var natsPublisher *messaging.NATSPublisher
-	if cfg.NATS.URL != "" {
+	if cfg.NATS.URL != "" && natsAdapter != nil {
 		logger.Log.Info("Initializing NATS Publisher", zap.String("url", cfg.NATS.URL))
-		natsPublisher, err = messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.Prefix)
-		if err != nil {
-			logger.Log.Error("Failed to initialize NATS Publisher", zap.Error(err))
+		var pubErr error
+		natsPublisher, pubErr = messaging.NewNATSPublisher(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.Prefix)
+		if pubErr != nil {
+			logger.Log.Warn("NATS Publisher not connected, pressing on without it", zap.Error(pubErr))
+			natsPublisher = nil
 		} else {
 			defer natsPublisher.Close()
 		}
@@ -108,6 +121,7 @@ func main() {
 		Port:            cfg.DB.Port,
 		User:            cfg.DB.User,
 		Password:        cfg.DB.Password,
+		ChannelBinding:  cfg.DB.ChannelBinding,
 		Database:        cfg.DB.Database,
 		SSLMode:         cfg.DB.SSLMode,
 		MaxOpenConns:    cfg.DB.MaxOpenConns,
@@ -166,8 +180,6 @@ func main() {
 	}
 	defer db.Close()
 
-
-
 	// slog.Info("Initializing PostgreSQL repository...")
 	// db1, err := database.NewPostgresDB(dbConfig)
 	// if err != nil {
@@ -182,15 +194,12 @@ func main() {
 	// }
 	// logger.Log.Info("Database migration completed successfully")
 
-
-
-
-// slog.Info("Running database migrations...", "migrations_dir", cfg.MigrationsDir)
-// 	if err := database.MigrateDir(db, cfg.MigrationsDir); err != nil {
-// 		slog.Error("Failed to migrate database", "error", err)
-// 		os.Exit(1)
-// 	}
-// 	slog.Info("Database migration completed successfully")
+	// slog.Info("Running database migrations...", "migrations_dir", cfg.MigrationsDir)
+	// 	if err := database.MigrateDir(db, cfg.MigrationsDir); err != nil {
+	// 		slog.Error("Failed to migrate database", "error", err)
+	// 		os.Exit(1)
+	// 	}
+	// 	slog.Info("Database migration completed successfully")
 
 	// 3. Run migrations
 	logger.Log.Info("Running database migrations...")
@@ -216,14 +225,13 @@ func main() {
 	auditService := application.NewAuditService(repo)
 	healthService := application.NewHealthService(repo, dockerAdapter)
 	configService := application.NewConfigService(repo, auditService)
-	claudeDBService := application.NewClaudeDBService(repo, natsPublisher, cfg.Server.Region, cfg.Server.PublicHostIP,cfg.NATS.Prefix)
+	claudeDBService := application.NewClaudeDBService(repo, natsPublisher, cfg.Server.Region, cfg.Server.PublicHostIP, cfg.NATS.Prefix)
 	volumeService := application.NewVolumeService(repo, dockerAdapter, cfg.Server.Region)
 	snapshotService := application.NewSnapshotService(repo, dockerAdapter, cfg.Server.Region, claudeDBService)
 	docsService := application.NewDocsService("docs")
 
-
 	if cfg.NATS.URL != "" {
-		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.Prefix,claudeDBService)
+		natsSubscriber, err := messaging.NewNATSSubscriber(cfg.NATS.URL, cfg.NATS.User, cfg.NATS.Password, cfg.NATS.Prefix, claudeDBService)
 		if err != nil {
 			logger.Log.Warn("Failed to initialize NATS subscriber", zap.Error(err))
 		} else {
@@ -251,12 +259,12 @@ func main() {
 	logger.Log.Info("Initializing HTTP handlers...")
 
 	// Temporarily passing nil for IAMValidator since it was stripped out in a previous PR
-	claudeDBHandler := http.NewClaudeDBHandler(claudeDBService, volumeService, snapshotService, nil)
-	healthHandler := http.NewHealthHandler(healthService)
-	configHandler := http.NewConfigHandler(configService)
-	docsHandler := http.NewDocsHandler(docsService)
+	claudeDBHandler := handler.NewClaudeDBHandler(claudeDBService, volumeService, snapshotService, nil)
+	healthHandler := handler.NewHealthHandler(healthService)
+	configHandler := handler.NewConfigHandler(configService)
+	docsHandler := handler.NewDocsHandler(docsService)
 
-	handlers := &http.Handlers{
+	handlers := &transport.Handlers{
 		ClaudeDB: claudeDBHandler,
 		Health:   healthHandler,
 		Config:   configHandler,
@@ -265,7 +273,7 @@ func main() {
 
 	// 9. Setup router
 	router := gin.Default()
-	http.RegisterRoutes(router, handlers)
+	transport.RegisterRoutes(router, handlers)
 
 	// 10. Start server
 	logger.Log.Info("🚀 RDS Service starting", zap.String("port", cfg.Server.Port))

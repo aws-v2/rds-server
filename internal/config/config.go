@@ -38,6 +38,8 @@ type DBConfig struct {
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
+	ChannelBinding string
+
 	ConnMaxIdleTime time.Duration
 }
 
@@ -74,8 +76,9 @@ func Load() (*Config, error) {
 			Port:            getEnvInt("DB_PORT", 5432),
 			User:            getEnv("DB_USER", "root"),
 			Password:        getEnv("DB_PASSWORD", "root"),
-			Database:        getEnv("DB_NAME", "rds_db2"),
+			Database:        getEnv("DB_NAME", "rds_db"),
 			SSLMode:         getEnv("DB_SSLMODE", "disable"),
+			ChannelBinding:         getEnv("DB_CHANNEL_BINDING", ""),
 			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
 			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 10),
 			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
