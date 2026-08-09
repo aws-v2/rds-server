@@ -37,3 +37,18 @@ func (h *HealthHandler) Ping(c *gin.Context) {
 
 	}
 }
+
+
+func (h *HealthHandler) Health(c *gin.Context) {
+	if h.healthService.Ping(c.Request.Context()) {
+
+		utils.RespondSucces(c, http.StatusCreated, "Pinged health successfully", gin.H{
+			"ping": "pong",
+		})
+
+		// c.JSON(http.StatusOK, )
+	} else {
+		utils.RespondError(c, http.StatusServiceUnavailable, fmt.Errorf("service ping unavailable"))
+
+	}
+}

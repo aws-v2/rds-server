@@ -111,7 +111,7 @@ jobs:
 # NATS_URL=nats://nats-staging:4222
 # NATS_USERNAME=nats-staging-user
 # NATS_PASSWORD=nats-staging-password
-# EUREKA_SERVER_URL=http://discovery-server-staging:8761/eureka
+# EUREKA_SERVER_URL=https://discovery-server-staging.onrender.com/eureka
 # PUBLIC_HOST_IP=192.168.1.7
 # AWS_REGION=eu-north-1
 

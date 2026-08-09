@@ -111,6 +111,7 @@ func registerHealthRoutes(v1 *gin.RouterGroup, handler *handler.HealthHandler) {
 	health := v1.Group("/health")
 	{
 		health.GET("/ping", handler.Ping)
+		health.GET("/", handler.Health)
 	}
 }
 func registerConfigRoutes(v1 *gin.RouterGroup, handler *handler.ConfigHandler) {
