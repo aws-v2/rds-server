@@ -470,7 +470,7 @@ func (p *NATSPublisher) ProvisionRDSInstance(event domain.ProvisionInstanceEvent
 		return domain.EC2Response{}, fmt.Errorf("failed to publish ProvisionInstanceEvent: %w", err)
 	}
 
-	log.Printf("[RDS-NATS] [SUCCESS] Got a replyt: correlation_id=%s resource=%v", ec2Response.GatewayIP, ec2Response.GatewayPort)
+	log.Printf("[RDS-NATS] [SUCCESS] Got a replyt: vmip=%s resource=%v", ec2Response.VMiP, ec2Response.GatewayPort)
 	return ec2Response, nil
 }
 

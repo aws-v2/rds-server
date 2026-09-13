@@ -29,6 +29,7 @@ type RepositoryPort interface {
 	CreateDatabaseTx(ctx context.Context, db *domain.Database, cred *domain.Credential, op *domain.Operation) error
 	GetDatabase(ctx context.Context, id string) (*domain.Database, error)
 	GetDatabaseByIdempotencyKey(ctx context.Context, accountID, idempotencyKey string) (*domain.Database, error)
+	UpdatePortAndGateway(ctx context.Context, req *domain.Database)  error
 	ListDatabases(ctx context.Context, accountID string) ([]*domain.Database, error)
 	GetNextNodePort(ctx context.Context) (int, error)
 	ListAllActiveDatabases(ctx context.Context) ([]*domain.Database, error)

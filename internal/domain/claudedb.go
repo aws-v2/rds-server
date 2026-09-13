@@ -79,13 +79,15 @@ type Database struct {
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updaetd_at"`
 	DeletedAt   string `json:"deleted_at"`
-	Engine string `json:"engine"`
-	Region string `json:"region"`
+	Engine      string `json:"engine"`
+	Region      string `json:"region"`
 }
 
 type EC2Response struct {
 	GatewayIP   string `json:"gateway_ip"`
 	GatewayPort int    `json:"gateway_port"`
+	VMiP        string `json:"vm_ip"`
+	VMPORT      int    `json:"vm_port"`
 }
 type CredentialStatus string
 
@@ -190,6 +192,8 @@ type Snapshot struct {
 }
 
 type ProvisionInstanceEvent struct {
+	RDSParticulars map[string]string `json:"rds_particulars"`
+
 	UserID     string          `json:"userID"`
 	Profile    string          `json:"profile" binding:"required"`
 	Name       string          `json:"name" binding:"required"`

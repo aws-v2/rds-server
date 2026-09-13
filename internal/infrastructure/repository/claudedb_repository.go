@@ -10,6 +10,20 @@ import (
 )
 
 // CreateDatabaseTx executes the provisioning flow using the gap-finder
+func (r *PostgresRepository) UpdatePortAndGateway(ctx context.Context, db *domain.Database) error {
+	query := `update databases set gateway_port=$1 , gateway_ip=$2, vm_ip=$3 where id=$4`
+
+	res, err := r.db.ExecContext(ctx, query, &db.GatewayPort,&db.GatewayIP, &db.VMIP,&db.ID,)
+	if err != nil {
+		return fmt.Errorf("failed to update database status: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+
+}
 func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Database, cred *domain.Credential, op *domain.Operation) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -35,20 +49,22 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 		gateway_ip, gateway_port, 
 		vm_db_port,status, created_at, updated_at )	
 		VALUES ($1, $2, $3, $4, $5, $6,$7, NOW(), NOW())
-		RETURNING gateway_ip,gateway_port 
+		RETURNING gateway_ip,gateway_port,id
 	`
-// TODO: this fmt.Sprintf shouldbe illegal,
-// however the query just wnt work, 
-// so we are subbing with instead
+	fmt.Printf("-------didnot return an rrer %v \n ", cred)
+
+	// TODO: this fmt.Sprintf shouldbe illegal,
+	// however the query just wnt work,
+	// so we are subbing with instead
 	// queryDb := fmt.Sprintf(`
-		// INSERT INTO databases 
-		// (user_id, 
-		// name,
-		// vm_ip, 
-		// gateway_ip, gateway_port, 
-		// vm_db_port, created_at, updated_at, status)	VALUES (
-	// 	'%s', 
-	// 	'%s', 
+	// INSERT INTO databases
+	// (user_id,
+	// name,
+	// vm_ip,
+	// gateway_ip, gateway_port,
+	// vm_db_port, created_at, updated_at, status)	VALUES (
+	// 	'%s',
+	// 	'%s',
 	// 	'%s', '%s', %d, %d, NOW() ,NOW(),'PROVISIONING')
 	// 	RETURNING created_at, updated_at;
 	// `, db.UserID, db.DBName, db.VMIP, db.GatewayIP, db.GatewayPort, db.VMDBPort)
@@ -60,11 +76,9 @@ func (r *PostgresRepository) CreateDatabaseTx(ctx context.Context, db *domain.Da
 		db.GatewayPort,
 		db.VMDBPort,
 		db.Status,
-	).Scan(&db.GatewayIP, &db.GatewayPort)
+	).Scan(&db.GatewayIP, &db.GatewayPort, &db.ID)
 
-	// result,err := tx.ExecContext(ctx, queryDb,) 
- 
-	// fmt.Printf("-------didnot return an rrer %v \n ",  rk)
+	// result,err := tx.ExecContext(ctx, queryDb,)
 
 	if err != nil {
 		return fmt.Errorf("failed to insert database: %w", err)
@@ -132,13 +146,13 @@ func (r *PostgresRepository) GetDatabase(ctx context.Context, id string) (*domai
 	fmt.Print(query)
 	db := &domain.Database{}
 	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&db.ID, 
-		&db.UserID, 
-		&db.DBName, 
-		&db.VMIP, 
-		&db.GatewayIP, 
-		&db.GatewayPort, 
-		&db.VMDBPort, 
+		&db.ID,
+		&db.UserID,
+		&db.DBName,
+		&db.VMIP,
+		&db.GatewayIP,
+		&db.GatewayPort,
+		&db.VMDBPort,
 		&db.CreatedAt,
 		&db.UpdatedAt,
 		&db.Status,
@@ -260,7 +274,7 @@ func (r *PostgresRepository) UpdateDatabasePublicPort(ctx context.Context, id st
 }
 
 func (r *PostgresRepository) UpdateDatabaseNetwork(ctx context.Context, id, vpcID, privateIP, nodeHost string) error {
-	query := `UPDATE databases SET vpc_id = $1, private_ip = $2, node_host = $3, updated_at = NOW() WHERE id = $4`
+	query := `UPDATE databases SET vpc_id = $1, private_ip = $2, vm = $3, updated_at = NOW() WHERE id = $4`
 	res, err := r.db.ExecContext(ctx, query, vpcID, privateIP, nodeHost, id)
 	if err != nil {
 		return fmt.Errorf("failed to update database network: %w", err)

@@ -13,3 +13,8 @@ CREATE TABLE IF NOT EXISTS scaling_policies (
 );
 
 CREATE INDEX IF NOT EXISTS idx_scaling_policies_tenant_id ON scaling_policies(tenant_id);
+
+
+
+-- alter table databases add column if not exists gateway_ip varchar(255) not NULL;
+-- alter table databases add column if not exists gateway_port integer not NULL;

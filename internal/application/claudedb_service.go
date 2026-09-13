@@ -125,6 +125,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 	}
 
 	credEntity := &domain.Credential{
+		DatabaseID:        dbEntity.ID,
 		RoleName:          roleName,
 		EncryptedPassword: password,
 		IsMaster:          true,
@@ -137,7 +138,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 	}
 
 	if err := s.repo.CreateDatabaseTx(ctx, dbEntity, credEntity, opEntity); err != nil {
-		return nil, fmt.Errorf("failed to save initial provisioning state: %w", err)
+		return nil, fmt.Errorf("failed to save initial provisio7654ning state: %w", err)
 	}
 	fmt.Printf("\n\n metadata passed\n\n")
 
@@ -146,6 +147,11 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 	// 5. Dispatch to EC2 Control Plane
 	// The EC2 service will select an "rds" host, boot a VM, inject credentials
 	// via cloud-init, and (eventually) publish a ready event back to us.
+
+	rdsParticulars := make(map[string]string)
+	rdsParticulars["DB_NAME"]=req.InstanceName
+	rdsParticulars["DB_PASSWORD"]=req.Password
+	rdsParticulars["DB_USER"]=req.User
 
 	provisionEvent := domain.ProvisionInstanceEvent{
 		UserID:     req.OwnerID,
@@ -158,6 +164,8 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 			RAM:     1024,
 			Storage: 10,
 		},
+
+		RDSParticulars: rdsParticulars,
 	}
 	var eC2Response domain.EC2Response
 
@@ -171,7 +179,22 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 		log.Printf("[RDS] WARNING: Failed to publish ProvisionInstanceEvent for database %s: %v", dbID, err)
 	}
 
-	fmt.Print(eC2Response.GatewayIP)
+	fmt.Printf("[RDS] WAR$NING: Failed to publish %v", eC2Response)
+
+	dbEnstity := &domain.Database{
+		ID:          dbEntity.ID,
+		UserID:      req.OwnerID,
+		DBName:      req.InstanceName,
+		VMIP:        eC2Response.VMiP,
+		GatewayIP:   eC2Response.GatewayIP,
+		GatewayPort: eC2Response.GatewayPort,
+		Status:      "PROVISIONING",
+		VMDBPort:    5432,
+	}
+
+	if err := s.repo.UpdatePortAndGateway(ctx, dbEnstity); err != nil {
+		return nil, fmt.Errorf("failed to save initial provisi777777oning state: %w", err)
+	}
 
 	// 6. Return immediately with PROVISIONING status.
 	// The connection string will be available once the EC2 VM is up.
@@ -241,18 +264,18 @@ func (s *ClaudeDBService) GetDatabase(ctx context.Context, id, accountID string)
 }
 
 type CurrentDB struct {
-	ID               string `json:"id"`
-	DBUser           string `json:"db_user"`
-	DBPassword       string `json:"db_password"`
+	ID                     string `json:"id"`
+	DBUser                 string `json:"db_user"`
+	DBPassword             string `json:"db_password"`
 	PublicConnectionString string `json:"public_connection_string"`
-	VPCConnectionString string `json:"vpc_connection_string"`
-	DBPort           int    `json:"db_port"`
-	PublicPort       int    `json:"public_port"`
-	Engine           string `json:"engine"`
-	CreatedAt        string `json:"created_at"`
-	VPCID            string `json:"vpc_id"` // the port in the vm where the db runs, default is 5432
-	Status           string `json:"status"`
-	VpcIP           string `json:"vpc_ip"`
+	VPCConnectionString    string `json:"vpc_connection_string"`
+	DBPort                 int    `json:"db_port"`
+	PublicPort             int    `json:"public_port"`
+	Engine                 string `json:"engine"`
+	CreatedAt              string `json:"created_at"`
+	VPCID                  string `json:"vpc_id"` // the port in the vm where the db runs, default is 5432
+	Status                 string `json:"status"`
+	VpcIP                  string `json:"vpc_ip"`
 
 	DBName string `json:"name"` // name of the database
 	Region string `json:"region"`
@@ -261,6 +284,11 @@ type CurrentDB struct {
 // GetDatabaseWithConnectionString returns database details including the master connection string
 func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, id, accountID string) (CurrentDB, error) {
 	db, err := s.GetDatabase(ctx, id, accountID)
+	if err != nil {
+		return CurrentDB{}, err
+	}
+
+	dbCreds, err := s.repo.GetActiveCredential(ctx, db.ID)
 	if err != nil {
 		return CurrentDB{}, err
 	}
@@ -275,19 +303,18 @@ func (s *ClaudeDBService) GetDatabaseWithConnectionString(ctx context.Context, i
 	// }
 
 	res := CurrentDB{
-		ID:               db.ID,
-		PublicConnectionString: fmt.Sprintf("postgres://%s:%s@%s:%d/%s", "username","password",db.GatewayIP,db.GatewayPort,db.DBName),
-		VPCConnectionString: "connectionstring",
-		DBPort:           db.VMDBPort, // this is the 5432
-		PublicPort:       db.GatewayPort,
-		DBUser:           "root-user",
-		DBPassword:       "password",
-		Engine:           "postgres-1",
-		DBName:           db.DBName, // thisis the physicaldb name inthe fronted
-		Region:           "region-1",
-		CreatedAt:        db.CreatedAt,
-		Status:           db.Status,
-
+		ID:                     db.ID,
+		PublicConnectionString: fmt.Sprintf("postgres://%s:%s@%s:%d/%s", dbCreds.RoleName, dbCreds.EncryptedPassword, db.GatewayIP, db.GatewayPort, db.DBName),
+		VPCConnectionString:    fmt.Sprintf("postgres://%s:%s@%s:%d/%s", dbCreds.RoleName, dbCreds.EncryptedPassword, db.VMIP, db.VMDBPort, db.DBName),
+		DBPort:                 db.VMDBPort, // this is the 5432
+		PublicPort:             db.GatewayPort,
+		DBUser:                 dbCreds.RoleName,
+		DBPassword:             dbCreds.EncryptedPassword,
+		Engine:                 "postgres-1",
+		DBName:                 db.DBName, // thisis the physicaldb name inthe fronted
+		Region:                 "region-1",
+		CreatedAt:              db.CreatedAt,
+		Status:                 db.Status,
 	}
 
 	return res, nil
@@ -456,7 +483,7 @@ func (s *ClaudeDBService) HandleProvisionLifeCycle(ctx context.Context, event *m
 	if isStartedEvent && isStartedStage {
 		// gather networking details
 		privateIP := event.Payload.InstanceStartedMetadata.InstancePrivateIp
-		publicIP := event.Payload.InstanceStartedMetadata.InstancePublicIp
+		// publicIP := event.Payload.InstanceStartedMetadata.InstancePublicIp
 		servicePort := event.Payload.ServicePort
 
 		// fetch DB record to validate and obtain VPC if missing
@@ -465,7 +492,7 @@ func (s *ClaudeDBService) HandleProvisionLifeCycle(ctx context.Context, event *m
 		// 	return fmt.Errorf("failed to load database %s: %w", resourceID, err)
 		// }
 
-		vpcID := "db.VPCID"
+		// vpcID := "db.VPCID"
 		// if vpcID == "" {
 		// 	// fall back to payload VPC if present
 		// 	if event.Payload.VPCID != "" {
@@ -474,31 +501,31 @@ func (s *ClaudeDBService) HandleProvisionLifeCycle(ctx context.Context, event *m
 		// }
 
 		// nodeHost: prefer public IP (for external access), but DB private IP is stored separately
-		nodeHost := publicIP
-		if nodeHost == "" {
-			nodeHost = privateIP
-		}
+		// nodeHost := publicIP
+		// if nodeHost == "" {
+		// 	nodeHost = privateIP
+		// }
 
-		if err := s.repo.UpdateDatabaseNetwork(ctx, resourceID, vpcID, privateIP, nodeHost); err != nil {
-			if s.isDuplicateNodeHostError(err) {
-				log.Printf("[RDS] duplicate node host when updating network for %s: %v", resourceID, err)
-				// fall through: still attempt to update status/public port
-			} else {
-				return fmt.Errorf("failed to update database network for %s: %w", resourceID, err)
-			}
-		}
+		// if err := s.repo.UpdateDatabaseNetwork(ctx, resourceID, vpcID, privateIP, nodeHost); err != nil {
+		// 	if s.isDuplicateNodeHostError(err) {
+		// 		log.Printf("[RDS] duplicate node host when updating network for %s: %v", resourceID, err)
+		// 		// fall through: still attempt to update status/public port
+		// 	} else {
+		// 		return fmt.Errorf("failed to update database network for %s: %w", resourceID, err)
+		// 	}
+		// }
 
-		if servicePort > 0 {
-			if err := s.repo.UpdateDatabasePublicPort(ctx, resourceID, servicePort); err != nil {
-				log.Printf("[RDS] failed to update public port for %s: %v", resourceID, err)
-			}
-		}
+		// if servicePort > 0 {
+		// 	if err := s.repo.UpdateDatabasePublicPort(ctx, resourceID, servicePort); err != nil {
+		// 		log.Printf("[RDS] failed to update public port for %s: %v", resourceID, err)
+		// 	}
+		// }
 
 		if err := s.repo.UpdateDatabaseStatus(ctx, resourceID, domain.DBStatusAvailable); err != nil {
 			return fmt.Errorf("failed to mark database %s available: %w", resourceID, err)
 		}
 
-		log.Printf("[RDS] Database %s marked AVAILABLE (host=%s private_ip=%s public_port=%d)", resourceID, nodeHost, privateIP, servicePort)
+		log.Printf("[RDS] Database %s marked AVAILABLE (host=%s private_ip=%s public_port=%d)", resourceID, privateIP, privateIP, servicePort)
 	}
 
 	return nil

@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 			Port:            getEnvInt("DB_PORT", 5432),
 			User:            getEnv("DB_USER", "root"),
 			Password:        getEnv("DB_PASSWORD", "root"),
-			Database:        getEnv("DB_NAME", "rds_db"),
+			Database:        getEnv("DB_NAME", "rds_db17"), //rds_db
 			SSLMode:         getEnv("DB_SSLMODE", "disable"),
 			ChannelBinding:         getEnv("DB_CHANNEL_BINDING", ""),
 			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 25),
