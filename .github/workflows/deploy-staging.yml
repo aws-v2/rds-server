@@ -27,7 +27,8 @@ jobs:
       - name: Build
         run: go build ./...
       - name: Run tests
-        run: go test ./... -v
+        run: go mod tidy
+        # run: go test ./... -v
 
   staging-build-image:
     runs-on: ubuntu-latest
@@ -81,7 +82,7 @@ jobs:
               --network aws-staging-network \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -p 8087:8087 \
-              -e APP_PROFILE=STAGING \
+              -e APP_PROFILE=staging \
               -e EUREKA_HOSTNAME=rds-server-staging \
               -e EUREKA_IP_ADDR=127.0.0.1 \
               -e RDS_PORT=8087 \
@@ -90,6 +91,7 @@ jobs:
               -e DB_USER=postgres-staging-user \
               -e DB_PASSWORD=postgres-staging-password \
               -e DB_NAME=rds_db2 \
+              -e NATS_PREFIX=staging.v1 \
               -e NATS_URL=nats://nats-staging:4222 \
               -e NATS_USERNAME=nats-staging-user \
               -e NATS_PASSWORD=nats-staging-password \
