@@ -27,6 +27,11 @@ type ClaudeDBService struct {
 	publicHostIP string
 	mu           sync.Mutex
 }
+	var allowedPermissions = map[string]bool{
+	"CREATEDB":    true,
+	"CREATEROLE":  true,
+	"REPLICATION": true,
+}
 
 const pendingNodeHostPrefix = "pending-rds://"
 
@@ -48,6 +53,25 @@ func generateRandomVPCSubnet() (subnet, gateway string) {
 	o3 := (int(b[1]) % 250) + 1  // 1..250
 	return fmt.Sprintf("10.%d.%d.0/24", o2, o3), fmt.Sprintf("10.%d.%d.1", o2, o3)
 }
+
+func ValidatePermissions(permissions []string) ([]string, error) {
+	perms := make([]string, 0, len(permissions))
+	seen := make(map[string]bool, len(permissions))
+
+	for _, p := range permissions {
+		p = strings.ToUpper(strings.TrimSpace(p))
+		if !allowedPermissions[p] {
+			return nil, fmt.Errorf("invalid permission %q", p)
+		}
+		if !seen[p] {
+			seen[p] = true
+			perms = append(perms, p)
+		}
+	}
+	return perms, nil
+}
+
+
 
 func databaseEndpoint(db *domain.Database) (string, int) {
 
@@ -95,7 +119,13 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 	if err := s.ValidateQuota(ctx, req.OwnerID); err != nil {
 		return nil, err
 	}
-	fmt.Printf("\n\n quota passed\n\n")
+	fmt.Printf("\n\n quota passed with these permissions %+v \n\n", req.Permissions)
+
+perms, err := ValidatePermissions(req.Permissions)
+if err != nil {
+	return nil, fmt.Errorf("Invalid permissions")
+}
+
 
 	// 3. Generate Metadata
 	randomSuffix := generateRandomHex(4) // 8 characters
@@ -152,6 +182,11 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 	rdsParticulars["DB_NAME"]=req.InstanceName
 	rdsParticulars["DB_PASSWORD"]=req.Password
 	rdsParticulars["DB_USER"]=req.User
+	rdsParticulars["PERMISSIONS"] = strings.Join(perms, ",") 
+
+
+
+
 
 	provisionEvent := domain.ProvisionInstanceEvent{
 		UserID:     req.OwnerID,
@@ -174,7 +209,7 @@ func (s *ClaudeDBService) CreateDatabase(ctx context.Context, req domain.CreateD
 
 	}
 
-	eC2Response, err := s.publisher.ProvisionRDSInstance(provisionEvent)
+	eC2Response, err = s.publisher.ProvisionRDSInstance(provisionEvent)
 	if err != nil {
 		log.Printf("[RDS] WARNING: Failed to publish ProvisionInstanceEvent for database %s: %v", dbID, err)
 	}

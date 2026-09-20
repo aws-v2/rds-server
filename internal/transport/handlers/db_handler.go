@@ -1,6 +1,5 @@
 package handler
 
-
 import (
 	"fmt"
 	"log"
@@ -56,6 +55,9 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 
 	idempotencyKey := requestID
 
+	permissions := input.Permissions
+
+
 	req := domain.CreateDatabaseRequest{
 		SessionID :requestID,
 		InstanceName:           input.InstanceName,
@@ -63,7 +65,13 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 		Password:       input.Password,
 		OwnerID:        userID,
 		IdempotencyKey: idempotencyKey,
+		Permissions: permissions,
+
 	}
+
+
+ 
+
 
 	resp, err := h.dbService.CreateDatabase(c.Request.Context(), req)
 	if err != nil {
@@ -80,6 +88,8 @@ func (h *ClaudeDBHandler) CreateDatabase(c *gin.Context) {
 
 	utils.RespondSucces(c, http.StatusCreated, "Database provisioned successfully", resp)
 }
+
+
 
 func (h *ClaudeDBHandler) AssignVPC(c *gin.Context) {
 	requestID := c.GetString("requestID")

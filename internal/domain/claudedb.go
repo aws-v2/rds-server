@@ -21,9 +21,10 @@ const (
 )
 
 type CreateDatabasePayload struct {
-	InstanceName string `json:"name" binding:"required"`
-	User         string `json:"user,omitempty"`
-	Password     string `json:"password,omitempty"`
+	InstanceName string   `json:"name" binding:"required"`
+	User         string   `json:"user,omitempty"`
+	Password     string   `json:"password,omitempty"`
+	Permissions  []string `json:"permissions"`
 }
 
 type RestoreDatabasePayload struct {
@@ -239,6 +240,8 @@ type CreateDatabaseRequest struct {
 	VPCID          string
 	IdempotencyKey string
 	SessionID      string
+	Permissions  []string `json:"permissions"`
+
 }
 
 // CreateDatabaseResponse represents the result of the provisioning flow
