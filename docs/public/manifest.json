@@ -7,18 +7,5 @@
   "visibility": "public",
 
   "categories": [
-    {
-      "title": "Getting Started",
-      "items": [
-        {
-          "title": "Overview & Architecture",
-          "slug": "architecture"
-        },
-        {
-          "title": "Api Architexture",
-          "slug": "api-architexture"
-        }
-      ]
-    }
   ]
 }

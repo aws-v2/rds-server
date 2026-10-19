@@ -17,7 +17,7 @@ type Config struct {
 
 	// NATS
 	NATS NATSConfig
-
+METRICS_API_KEY  string
 	// Server
 	Server ServerConfig
 
@@ -71,6 +71,7 @@ func Load() (*Config, error) {
 	_ = godotenv.Load()
 
 	cfg := &Config{
+		METRICS_API_KEY:"e956807e27669001319d73d3a9f1728a4a1161c79a6a287160c3a73394c05df8",
 		DB: DBConfig{
 			Host:            getEnv("DB_HOST", "localhost"),
 			Port:            getEnvInt("DB_PORT", 5432),

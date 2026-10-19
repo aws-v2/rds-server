@@ -14,6 +14,7 @@ import (
 	"rds/internal/infrastructure/repository"
 	"rds/internal/logger"
 	"rds/internal/messaging"
+	"rds/internal/metrics"
 	"rds/internal/transport"
 	handler "rds/internal/transport/handlers"
 
@@ -270,9 +271,13 @@ func main() {
 		Config:   configHandler,
 		Docs:     docsHandler,
 	}
+	metrics.Serve(":7097", cfg.METRICS_API_KEY)
 
 	// 9. Setup router
 	router := gin.Default()
+	router.Use(metrics.MetricsMiddleware())   // first, before auth and before SetupRoutes
+
+
 	transport.RegisterRoutes(router, handlers)
 
 	// 10. Start server
